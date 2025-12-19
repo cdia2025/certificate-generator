@@ -9,238 +9,218 @@ import tempfile
 import requests
 
 # 頁面基本設定
-st.set_page_config(page_title="證書生成器 V4", layout="wide")
+st.set_page_config(page_title="專業證書生成器 V5", layout="wide")
 
-# --- 1. 強化版中文字體載入器 ---
+# --- 1. 強化版中文字體載入與斜體支援 ---
 @st.cache_resource
 def get_font_resource():
     """確保環境中一定有中文字體可用"""
-    # 1. 定義系統可能存在的路徑
     font_paths = [
         "C:/Windows/Fonts/msjh.ttc",            # Windows 微軟正黑
         "C:/Windows/Fonts/dfkai-sb.ttf",        # Windows 標楷體
         "/System/Library/Fonts/STHeiti Light.ttc", # macOS 華文黑體
-        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", # Linux
-        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"  # Linux
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"
     ]
-    
     for p in font_paths:
-        if os.path.exists(p):
-            return p
+        if os.path.exists(p): return p
 
-    # 2. 如果系統路徑都沒有，從網路下載思源黑體 (Noto Sans TC)
     target_path = os.path.join(tempfile.gettempdir(), "NotoSansTC-Regular.otf")
     if not os.path.exists(target_path):
-        # 這是 Google Fonts 的原始下載鏈接 (繁體中文)
         url = "https://github.com/googlefonts/noto-cjk/raw/main/Sans/OTF/TraditionalChinese/NotoSansCJKtc-Regular.otf"
         try:
-            with st.spinner("正在初始化中文字體庫 (僅需執行一次)..."):
-                response = requests.get(url, timeout=15)
-                with open(target_path, "wb") as f:
-                    f.write(response.content)
+            response = requests.get(url, timeout=15)
+            with open(target_path, "wb") as f: f.write(response.content)
             return target_path
-        except Exception as e:
-            st.error(f"字體下載失敗，請檢查網路連線: {e}")
-            return None
+        except: return None
     return target_path
 
-def load_font(size):
-    font_path = get_font_resource()
+def draw_styled_text(draw, text, pos, font, color, align="居中", bold=False, italic=False):
+    """處理模擬粗體與模擬斜體的繪製函數"""
+    # 1. 計算文字大小
     try:
-        if font_path:
-            return ImageFont.truetype(font_path, size)
-    except Exception:
-        pass
-    return ImageFont.load_default()
+        left, top, right, bottom = draw.textbbox((0, 0), text, font=font)
+        tw = right - left
+        th = bottom - top
+    except:
+        tw, th = len(text) * font.size * 0.7, font.size
+
+    # 2. 處理對齊
+    x, y = pos
+    if align == "居中": x -= tw // 2
+    elif align == "右對齊": x -= tw
+
+    # 3. 如果是斜體，我們需要單獨渲染文字後進行變換
+    if italic:
+        # 創建一個暫存的文字層
+        # 寬度多給一些空間防止斜體被切掉
+        txt_img = Image.new("RGBA", (int(tw * 1.5), int(th * 2)), (255, 255, 255, 0))
+        d_txt = ImageDraw.Draw(txt_img)
+        
+        # 繪製模擬粗體於暫存層
+        if bold:
+            for dx, dy in [(-1,-1), (1,1), (1,-1), (-1,1)]:
+                d_txt.text((10+dx, 10+dy), text, font=font, fill=color)
+        d_txt.text((10, 10), text, font=font, fill=color)
+        
+        # 物理斜體變換 (仿 Photoshop 傾斜)
+        # 矩陣參數: (1, 斜率, 0, 0, 1, 0)
+        m = 0.3 # 傾斜程度
+        txt_img = txt_img.transform(txt_img.size, Image.AFFINE, (1, m, -10*m, 0, 1, 0))
+        
+        # 將斜體文字貼回主圖
+        return (txt_img, (int(x - 10), int(y - 10)))
+    else:
+        # 非斜體：直接在原圖繪製
+        if bold:
+            for dx, dy in [(-1,-1), (1,1), (1,-1), (-1,1)]:
+                draw.text((x + dx, y + dy), text, font=font, fill=color)
+        draw.text((x, y), text, font=font, fill=color)
+        return None
 
 # --- 2. 初始化 Session State ---
 if "settings" not in st.session_state:
     st.session_state.settings = {}
+if "linked_layers" not in st.session_state:
+    st.session_state.linked_layers = []
 
 # --- 3. 介面頂部與檔案上傳 ---
-st.title("✉️ 專業證書生成器 V4")
+st.title("✉️ 專業證書生成器 V5 (Photoshop 圖層管理版)")
 
 # 側邊欄：配置管理
 with st.sidebar:
-    st.header("💾 配置管理")
+    st.header("💾 設定存檔")
     if st.session_state.settings:
         config_json = json.dumps(st.session_state.settings, indent=4, ensure_ascii=False)
-        st.download_button("📤 匯出目前設定 (JSON)", config_json, "cert_config.json", "application/json")
+        st.download_button("📤 匯出設定 (JSON)", config_json, "cert_config.json", "application/json")
     
     uploaded_config = st.file_uploader("📥 載入舊設定檔", type=["json"])
     if uploaded_config:
-        try:
-            st.session_state.settings.update(json.load(uploaded_config))
-            st.success("配置已載入！")
-        except:
-            st.error("配置檔解析失敗")
+        st.session_state.settings.update(json.load(uploaded_config))
+        st.success("配置已載入")
 
-# 上傳區
 up1, up2 = st.columns(2)
-with up1:
-    bg_file = st.file_uploader("🖼️ 1. 上傳證書背景圖", type=["jpg", "png", "jpeg"])
-with up2:
-    data_file = st.file_uploader("📊 2. 上傳資料檔 (Excel/CSV)", type=["xlsx", "csv"])
+with up1: bg_file = st.file_uploader("🖼️ 1. 上傳證書背景圖", type=["jpg", "png", "jpeg"])
+with up2: data_file = st.file_uploader("📊 2. 上傳資料檔", type=["xlsx", "csv"])
 
 if not bg_file or not data_file:
-    st.info("👋 請先上傳背景圖片和 Excel/CSV 資料檔開始工作。")
+    st.info("👋 請上傳背景圖片和資料檔以開始。")
     st.stop()
 
 # 讀取檔案
-bg_img = Image.open(bg_file)
+bg_img = Image.open(bg_file).convert("RGBA")
 W, H = bg_img.size
 df = pd.read_excel(data_file) if data_file.name.endswith('xlsx') else pd.read_csv(data_file)
 
 st.divider()
 
-# --- 4. 工作區佈局 ---
+# --- 4. Photoshop 式圖層批量工具 ---
+st.header("🔗 Photoshop 圖層工具 (批量修改)")
+display_cols = st.multiselect("選擇要在證書上顯示的欄位", df.columns, default=[df.columns[0]])
+
+# 初始化設定
+for col in display_cols:
+    if col not in st.session_state.settings:
+        st.session_state.settings[col] = {"x": W//2, "y": H//2, "size": 60, "color": "#000000", "align": "居中", "bold": False, "italic": False}
+
+col_link1, col_link2 = st.columns([1, 2])
+with col_link1:
+    st.subheader("1. 連結圖層")
+    st.session_state.linked_layers = st.multiselect("選取要同時移動的欄位", display_cols)
+    st.caption("勾選後，可使用右側工具「一鍵移動」這些圖層。")
+
+with col_link2:
+    st.subheader("2. 批量位移控制器")
+    lc1, lc2, lc3 = st.columns(3)
+    with lc1: move_x = st.number_input("批量左右位移 (px)", value=0)
+    with lc2: move_y = st.number_input("批量上下位移 (px)", value=0)
+    with lc3: change_size = st.number_input("批量縮放大小", value=0)
+    
+    if st.button("✅ 執行批量改動 (套用到已連結圖層)", use_container_width=True):
+        for col in st.session_state.linked_layers:
+            st.session_state.settings[col]["x"] += move_x
+            st.session_state.settings[col]["y"] += move_y
+            st.session_state.settings[col]["size"] += change_size
+        st.rerun()
+
+st.divider()
+
+# --- 5. 工作區佈局 ---
 col_ctrl, col_prev = st.columns([1, 1], gap="large")
 
 with col_ctrl:
-    st.header("🛠️ 參數調整")
-    
-    # 名單選擇
-    id_col = st.selectbox("選擇識別欄位 (用於檔案命名)", df.columns)
-    all_items = df[id_col].astype(str).tolist()
-    
-    c1, c2 = st.columns([1, 2])
-    with c1:
-        is_all = st.checkbox("全選所有名單")
-    with c2:
-        selected_items = st.multiselect("選取生成名單", all_items, default=all_items if is_all else all_items[:2])
-    
+    st.header("🛠️ 單獨調整")
+    id_col = st.selectbox("識別欄位 (用於檔案命名)", df.columns)
+    selected_items = st.multiselect("選取生成名單", df[id_col].astype(str).tolist(), default=df[id_col].astype(str).tolist()[:1])
     target_df = df[df[id_col].astype(str).isin(selected_items)]
 
-    # 欄位內容設定
-    st.subheader("📋 顯示欄位設定")
-    display_cols = st.multiselect("要在證書上顯示的欄位", df.columns, default=[df.columns[0]])
-    
     for col in display_cols:
-        # 記憶上次設定值
-        if col not in st.session_state.settings:
-            st.session_state.settings[col] = {
-                "x": W//2, "y": H//2, "size": 60, "color": "#000000", "align": "居中", "bold": False
-            }
-        
-        with st.expander(f"📝 欄位：{col}", expanded=True):
+        with st.expander(f"📝 欄位：{col} {' (🔗 已連結)' if col in st.session_state.linked_layers else ''}", expanded=False):
             s = st.session_state.settings[col]
-            
-            # 座標設定
             cc1, cc2 = st.columns(2)
-            with cc1:
-                s["x"] = st.slider(f"{col} X 位置", 0, W, int(s["x"]), key=f"x_{col}")
-            with cc2:
-                s["y"] = st.slider(f"{col} Y 位置", 0, H, int(s["y"]), key=f"y_{col}")
+            with cc1: s["x"] = st.slider(f"X 位置", 0, W, int(s["x"]), key=f"x_{col}")
+            with cc2: s["y"] = st.slider(f"Y 位置", 0, H, int(s["y"]), key=f"y_{col}")
             
-            # 樣式設定
-            cc3, cc4, cc5 = st.columns([1, 1, 1])
-            with cc3:
-                s["size"] = st.number_input(f"字體大小", 10, 1000, int(s["size"]), key=f"sz_{col}")
-            with cc4:
-                s["color"] = st.color_picker(f"顏色", s["color"], key=f"cl_{col}")
-            with cc5:
-                s["align"] = st.selectbox(f"對齊", ["左對齊", "居中", "右對齊"], index=1, key=f"al_{col}")
+            cc3, cc4 = st.columns(2)
+            with cc3: s["size"] = st.number_input(f"字體大小", 10, 1000, int(s["size"]), key=f"sz_{col}")
+            with cc4: s["color"] = st.color_picker(f"顏色", s["color"], key=f"cl_{col}")
             
-            s["bold"] = st.checkbox("模擬粗體 (文字加粗)", value=s["bold"], key=f"bd_{col}")
+            cc5, cc6 = st.columns(2)
+            with cc5: s["bold"] = st.checkbox("粗體 (Bold)", s["bold"], key=f"bd_{col}")
+            with cc6: s["italic"] = st.checkbox("斜體 (Italic)", s["italic"], key=f"it_{col}")
+            s["align"] = st.selectbox(f"對齊", ["左對齊", "居中", "右對齊"], index=["左對齊", "居中", "右對齊"].index(s["align"]), key=f"al_{col}")
 
 with col_prev:
     st.header("👁️ 即時預覽")
-    
-    # 預覽縮放滑桿 - 修正縮放比例問題
-    zoom_percent = st.slider("🔍 調整右側預覽圖顯示大小 (不影響輸出)", 10, 100, 50)
+    zoom = st.slider("🔍 預覽圖視覺縮放", 10, 100, 50)
     
     if not target_df.empty:
-        # 取第一筆資料做預覽
         row = target_df.iloc[0]
         preview_canvas = bg_img.copy()
         draw = ImageDraw.Draw(preview_canvas)
         
         for col in display_cols:
             s = st.session_state.settings[col]
-            txt = str(row[col])
             font = load_font(s["size"])
+            text_val = str(row[col])
             
-            # 計算寬度以處理對齊
-            try:
-                # 取得文字框範圍
-                left, top, right, bottom = draw.textbbox((0, 0), txt, font=font)
-                tw = right - left
-            except:
-                tw = len(txt) * s["size"] * 0.7 # 估計值備援
+            # 繪製 (支援斜體模擬)
+            layer_info = draw_styled_text(
+                draw, text_val, (s["x"], s["y"]), font, s["color"], 
+                s["align"], s["bold"], s["italic"]
+            )
             
-            final_x = s["x"]
-            if s["align"] == "居中":
-                final_x -= tw // 2
-            elif s["align"] == "右對齊":
-                final_x -= tw
+            # 如果是斜體，貼回圖層
+            if layer_info:
+                img_layer, pos = layer_info
+                preview_canvas.alpha_composite(img_layer, dest=pos)
             
-            # 繪製模擬粗體
-            if s["bold"]:
-                for dx, dy in [(-1,-1), (1,1), (1,-1), (-1,1)]:
-                    draw.text((final_x + dx, s["y"] + dy), txt, font=font, fill=s["color"])
-            
-            # 繪製主文字
-            draw.text((final_x, s["y"]), txt, font=font, fill=s["color"])
-            
-            # 繪製輔助紅線 (讓用戶知道精確點在哪)
-            draw.line([(0, s["y"]), (W, s["y"])], fill="#FF000055", width=2)
-            draw.line([(s["x"], 0), (s["x"], H)], fill="#0000FF55", width=2)
+            # 輔助線
+            color_line = "#FF000088" if col in st.session_state.linked_layers else "#0000FF33"
+            draw.line([(0, s["y"]), (W, s["y"])], fill=color_line, width=2)
+            draw.line([(s["x"], 0), (s["x"], H)], fill=color_line, width=2)
 
-        # 顯示預覽圖
-        display_w = int(W * (zoom_percent / 100))
-        st.image(preview_canvas, width=display_w, caption=f"預覽模式 (第一位對象：{row[id_col]})")
+        st.image(preview_canvas, width=int(W * (zoom/100)))
 
-# --- 5. 批量生成功能 ---
+# --- 6. 批量生成 ---
 st.divider()
-if st.button("🚀 開始批量生成並打包下載", type="primary", use_container_width=True):
-    if target_df.empty:
-        st.warning("請先選擇要生成的名單")
-    else:
-        zip_buffer = io.BytesIO()
-        with zipfile.ZipFile(zip_buffer, "w") as zf:
-            progress_bar = st.progress(0)
-            status_text = st.empty()
+if st.button("🚀 生成所有選定證書", type="primary", use_container_width=True):
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w") as zf:
+        prog = st.progress(0)
+        for idx, (i, row) in enumerate(target_df.iterrows()):
+            cert_img = bg_img.copy()
+            d = ImageDraw.Draw(cert_img)
+            for col in display_cols:
+                s = st.session_state.settings[col]
+                f = load_font(s["size"])
+                info = draw_styled_text(d, str(row[col]), (s["x"], s["y"]), f, s["color"], s["align"], s["bold"], s["italic"])
+                if info:
+                    l_img, l_pos = info
+                    cert_img.alpha_composite(l_img, dest=l_pos)
             
-            for idx, (i, row) in enumerate(target_df.iterrows()):
-                status_text.text(f"正在製作: {row[id_col]} ({idx+1}/{len(target_df)})")
-                
-                # 繪製單張證書
-                cert_img = bg_img.copy()
-                d = ImageDraw.Draw(cert_img)
-                
-                for col in display_cols:
-                    s = st.session_state.settings[col]
-                    f = load_font(s["size"])
-                    t = str(row[col])
-                    
-                    try:
-                        l, tp, r, b = d.textbbox((0, 0), t, font=f)
-                        tw = r - l
-                    except: tw = len(t) * s["size"] * 0.7
-                    
-                    fx = s["x"]
-                    if s["align"] == "居中": fx -= tw // 2
-                    elif s["align"] == "右對齊": fx -= tw
-                    
-                    if s["bold"]:
-                        for dx, dy in [(-1,-1), (1,1)]:
-                            d.text((fx+dx, s["y"]+dy), t, font=f, fill=s["color"])
-                    d.text((fx, s["y"]), t, font=f, fill=s["color"])
-                
-                # 存入 ZIP
-                img_io = io.BytesIO()
-                cert_img.save(img_io, format="PNG", optimize=True)
-                zf.writestr(f"{str(row[id_col]).replace('/', '_')}.png", img_io.getvalue())
-                
-                progress_bar.progress((idx + 1) / len(target_df))
-            
-            status_text.text("✅ 全部製作完成！")
-        
-        st.download_button(
-            "📥 點此下載 ZIP 壓縮檔",
-            zip_buffer.getvalue(),
-            file_name="certificates_pack.zip",
-            mime="application/zip",
-            use_container_width=True
-        )
-        st.balloons()
+            img_io = io.BytesIO()
+            cert_img.convert("RGB").save(img_io, format="JPEG", quality=95)
+            zf.writestr(f"{row[id_col]}.jpg", img_io.getvalue())
+            prog.progress((idx+1)/len(target_df))
+    st.download_button("📥 下載 ZIP 壓縮檔", zip_buffer.getvalue(), "certs.zip", "application/zip", use_container_width=True)
