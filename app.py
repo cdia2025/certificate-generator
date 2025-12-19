@@ -7,48 +7,16 @@ import json
 import os
 import tempfile
 import requests
-import copy
-import streamlit.components.v1 as components
 
 # ==========================================
 # 1. 系統初始化與頁面設定
 # ==========================================
-st.set_page_config(page_title="專業證書生成器 V5.7 CTRL+Z 版", layout="wide")
+st.set_page_config(page_title="專業證書生成器 V5.6 安全修復版", layout="wide")
 
-# 初始化 Session State
 if "settings" not in st.session_state:
     st.session_state.settings = {}
 if "linked_layers" not in st.session_state:
     st.session_state.linked_layers = []
-if "history" not in st.session_state:
-    st.session_state.history = []
-
-# --- 歷史紀錄函數 ---
-def save_history():
-    """將目前的設定深拷貝一份存入歷史堆疊"""
-    # 限制歷史紀錄為最近 20 步，避免消耗過多記憶體
-    if len(st.session_state.history) > 20:
-        st.session_state.history.pop(0)
-    st.session_state.history.append(copy.deepcopy(st.session_state.settings))
-
-def undo():
-    """執行撤銷動作"""
-    if st.session_state.history:
-        # 取出最後一份快照
-        last_settings = st.session_state.history.pop()
-        st.session_state.settings = last_settings
-        # 同步更新所有組件的 Key，防止 Slider 回彈
-        for col, s_dict in last_settings.items():
-            st.session_state[f"x_{col}"] = float(s_dict["x"])
-            st.session_state[f"y_{col}"] = float(s_dict["y"])
-            st.session_state[f"s_{col}"] = int(s_dict["size"])
-            st.session_state[f"c_{col}"] = s_dict["color"]
-            st.session_state[f"b_{col}"] = s_dict["bold"]
-            st.session_state[f"i_{col}"] = s_dict["italic"]
-            st.session_state[f"a_{col}"] = s_dict["align"]
-        st.toast("已撤銷上一步改動 (CTRL+Z)")
-    else:
-        st.toast("已經沒有更早的紀錄了")
 
 # ==========================================
 # 2. 字體處理與繪製邏輯
@@ -64,6 +32,7 @@ def get_font_resource():
     ]
     for p in font_paths:
         if os.path.exists(p): return p
+
     target_path = os.path.join(tempfile.gettempdir(), "NotoSansTC-Regular.otf")
     if not os.path.exists(target_path):
         url = "https://github.com/googlefonts/noto-cjk/raw/main/Sans/OTF/TraditionalChinese/NotoSansCJKtc-Regular.otf"
@@ -89,9 +58,11 @@ def draw_styled_text(draw, text, pos, font, color, align="居中", bold=False, i
         tw, th = right - left, bottom - top
     except:
         tw, th = len(text) * font.size * 0.7, font.size
+
     x, y = pos
     if align == "居中": x -= tw // 2
     elif align == "右對齊": x -= tw
+
     if italic:
         padding = 60
         txt_img = Image.new("RGBA", (int(tw * 1.5) + padding, int(th * 2) + padding), (255, 255, 255, 0))
@@ -113,38 +84,18 @@ def draw_styled_text(draw, text, pos, font, color, align="居中", bold=False, i
 # ==========================================
 # 3. 檔案上傳區
 # ==========================================
-st.title("✉️ 專業證書生成器 V5.7")
-
-# --- CTRL+Z 鍵盤監聽腳本 ---
-# 這段 JS 會監聽 Ctrl+Z 並尋找帶有 "撤銷" 字樣的按鈕進行點擊
-components.html(
-    """
-    <script>
-    const doc = window.parent.document;
-    doc.addEventListener('keydown', function(e) {
-        if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
-            e.preventDefault();
-            // 尋找按鈕文字包含 "撤銷" 的元素
-            const buttons = Array.from(doc.querySelectorAll('button'));
-            const undoBtn = buttons.find(el => el.innerText.includes('撤銷'));
-            if (undoBtn) undoBtn.click();
-        }
-    });
-    </script>
-    """,
-    height=0,
-)
+st.title("✉️ 專業證書生成器 V5.6")
 
 up1, up2 = st.columns(2)
-with up1: bg_file = st.file_uploader("🖼️ 1. 上傳背景圖片", type=["jpg", "png", "jpeg"], key="main_bg")
-with up2: data_file = st.file_uploader("📊 2. 上傳資料檔", type=["xlsx", "csv"], key="main_data")
+with up1: bg_file = st.file_uploader("🖼️ 1. 上傳證書背景圖", type=["jpg", "png", "jpeg"], key="main_bg")
+with up2: data_file = st.file_uploader("📊 2. 上傳資料檔 (Excel/CSV)", type=["xlsx", "csv"], key="main_data")
 
 if not bg_file or not data_file:
-    st.info("💡 提示：側邊欄邊界可調整寬度。使用快捷鍵 CTRL+Z 可還原上一步動作。")
+    st.info("💡 提示：上傳檔案後，使用左側「側邊欄」調整。側邊欄邊界可滑鼠拖拽寬度。")
     st.stop()
 
 bg_img = Image.open(bg_file).convert("RGBA")
-W, H = float(bg_img.size[0]), float(bg_img.size[1])
+W, H = float(bg_img.size[0]), float(bg_img.size[1]) # 轉為 float 確保與 slider 類型一致
 df = pd.read_excel(data_file) if data_file.name.endswith('xlsx') else pd.read_csv(data_file)
 
 # ==========================================
@@ -153,37 +104,35 @@ df = pd.read_excel(data_file) if data_file.name.endswith('xlsx') else pd.read_cs
 with st.sidebar:
     st.header("⚙️ 參數調整面板")
     
-    # --- 撤銷按鈕 ---
-    if st.button("↩️ 撤銷 (CTRL+Z)", use_container_width=True):
-        undo()
-        st.rerun()
-
     with st.expander("💾 配置存取"):
         if st.session_state.settings:
             js = json.dumps(st.session_state.settings, indent=4, ensure_ascii=False)
             st.download_button("📤 匯出設定 (JSON)", js, "config.json", "application/json")
         uploaded_config = st.file_uploader("📥 載入舊設定", type=["json"])
         if uploaded_config:
-            save_history() # 變動前存入歷史
             st.session_state.settings.update(json.load(uploaded_config))
             st.success("配置已載入")
 
     display_cols = st.multiselect("顯示欄位", df.columns, default=[df.columns[0]])
     
-    # 補全參數與邊界檢查
+    # 確保每個欄位都有設定且數值在邊界內
     for col in display_cols:
         if col not in st.session_state.settings:
             st.session_state.settings[col] = {"x": W/2, "y": H/2, "size": 60, "color": "#000000", "align": "居中", "bold": False, "italic": False}
         else:
+            # 安全防護：補全缺失參數並強制鉗制座標在當前圖片範圍內
             s_dict = st.session_state.settings[col]
             s_dict["x"] = max(0.0, min(W, float(s_dict.get("x", W/2))))
             s_dict["y"] = max(0.0, min(H, float(s_dict.get("y", H/2))))
-            for k, v in {"size":60, "color":"#000000", "align":"居中", "bold":False, "italic":False}.items():
-                if k not in s_dict: s_dict[k] = v
+            if "size" not in s_dict: s_dict["size"] = 60
+            if "color" not in s_dict: s_dict["color"] = "#000000"
+            if "align" not in s_dict: s_dict["align"] = "居中"
+            if "bold" not in s_dict: s_dict["bold"] = False
+            if "italic" not in s_dict: s_dict["italic"] = False
 
     st.divider()
 
-    # --- 批量工具 ---
+    # --- Photoshop 批量工具 (加入邊界防護) ---
     with st.expander("🔗 Photoshop 批量連結工具", expanded=True):
         st.session_state.linked_layers = st.multiselect("選取要同時移動的欄位", display_cols)
         lc1, lc2 = st.columns(2)
@@ -192,8 +141,8 @@ with st.sidebar:
         b_s = st.number_input("字體縮放", value=0)
         
         if st.button("✅ 執行批量套用", use_container_width=True):
-            save_history() # 批量改動前存入歷史
             for c in st.session_state.linked_layers:
+                # 運算並進行範圍鉗制
                 nx = max(0.0, min(W, float(st.session_state.settings[c]["x"] + b_x)))
                 ny = max(0.0, min(H, float(st.session_state.settings[c]["y"] + b_y)))
                 ns = max(10, min(1000, int(st.session_state.settings[c]["size"] + b_s)))
@@ -201,26 +150,28 @@ with st.sidebar:
                 st.session_state.settings[c]["x"] = nx
                 st.session_state.settings[c]["y"] = ny
                 st.session_state.settings[c]["size"] = ns
+                
+                # 同步更新內部 Key，確保 Slider 讀取正確
                 st.session_state[f"x_{c}"] = nx
                 st.session_state[f"y_{c}"] = ny
                 st.session_state[f"s_{c}"] = ns
-            st.toast("已執行批量位移")
             st.rerun()
 
     st.divider()
 
-    # --- 單獨圖層設定 ---
+    # --- 單獨圖層設定 (加入邊界防護) ---
     st.subheader("📝 單獨圖層設定")
     for col in display_cols:
         link_tag = " (🔗)" if col in st.session_state.linked_layers else ""
         with st.expander(f"圖層：{col}{link_tag}"):
             s = st.session_state.settings[col]
             
-            # 使用 callback 監聽 slider 變動，若變動則存入歷史 (實驗性：可能導致歷史過多)
-            # 為了穩定，我們這裡僅讓批量移動與配置載入支援完美撤銷
+            # 渲染 Slider 前再次確認數值合法，避免崩潰
+            cur_x = max(0.0, min(W, float(s["x"])))
+            cur_y = max(0.0, min(H, float(s["y"])))
             
-            s["x"] = st.slider(f"X 座標", 0.0, W, float(s["x"]), key=f"x_{col}")
-            s["y"] = st.slider(f"Y 座標", 0.0, H, float(s["y"]), key=f"y_{col}")
+            s["x"] = st.slider(f"X 座標", 0.0, W, cur_x, key=f"x_{col}")
+            s["y"] = st.slider(f"Y 座標", 0.0, H, cur_y, key=f"y_{col}")
             s["size"] = st.number_input(f"字體大小", 10, 1000, int(s["size"]), key=f"s_{col}")
             s["color"] = st.color_picker(f"文字顏色", s["color"], key=f"c_{col}")
             
@@ -249,18 +200,22 @@ if not target_df.empty:
     row_data = target_df.iloc[0]
     canvas = bg_img.copy()
     draw = ImageDraw.Draw(canvas)
+    
     for col in display_cols:
         set_val = st.session_state.settings[col]
         font_obj = get_font_object(set_val["size"])
         res = draw_styled_text(draw, str(row_data[col]), (set_val["x"], set_val["y"]), font_obj, set_val["color"], set_val["align"], set_val["bold"], set_val["italic"])
-        if res: canvas.alpha_composite(res[0], dest=res[1])
+        if res:
+            canvas.alpha_composite(res[0], dest=res[1])
+        
         guide_c = "#FF0000BB" if col in st.session_state.linked_layers else "#0000FF44"
         draw.line([(0, set_val["y"]), (W, set_val["y"])], fill=guide_c, width=2)
         draw.line([(set_val["x"], 0), (set_val["x"], H)], fill=guide_c, width=2)
+
     st.image(canvas, width=int(W * (zoom / 100)))
 
 # ==========================================
-# 6. 生成功能
+# 6. 生成
 # ==========================================
 st.divider()
 if st.button("🚀 開始批量製作選定證書", type="primary", use_container_width=True):
