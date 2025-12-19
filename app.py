@@ -1,16 +1,15 @@
 import streamlit as st
-import pandas as pd
 from PIL import Image, ImageDraw, ImageFont
 import io
 import zipfile
 
-st.set_page_config(page_title="多欄位證書生成器", layout="wide")
+st.set_page_config(page_title="Mail Merge 式證書生成器", layout="wide")
 
-st.title("📝 多欄位批量證書生成器（左右分欄 + 大預覽區）")
-st.markdown("**左邊調整設定，右邊即時大圖預覽，所見即所得！圖片自動縮放適應畫面**")
+st.title("✉️ Mail Merge 式多欄位證書生成器")
+st.markdown("**像 Word Mail Merge 一樣：選取特定人員 + 多欄位疊加 + 即時大預覽（大小可調）**")
 
-# 左右分欄
-left_col, right_col = st.columns([1, 1.5])  # 左1 : 右1.5，可調整比例
+# 左右分欄：左設定 (40%)，右預覽 (60%)
+left_col, right_col = st.columns([2, 3])
 
 with left_col:
     st.header("🛠️ 設定區")
@@ -35,22 +34,28 @@ with left_col:
     # 上傳字體（可選）
     font_file = st.file_uploader("（可選）上傳中文字體檔（.ttf，避免亂碼）", type=["ttf"])
 
-    # 過濾人員
-    st.subheader("人員過濾")
-    filter_column = st.selectbox("用哪一欄過濾？（例如「姓名」）", df.columns)
-    selected_names = st.multiselect("選擇特定人員（不選則全部）", df[filter_column].unique().tolist())
-    target_df = df[df[filter_column].isin(selected_names)] if selected_names else df
-    st.write(f"將生成 {len(target_df)} 張")
+    # Mail Merge 式人員選擇
+    st.subheader("✉️ Mail Merge 人員選擇")
+    filter_column = st.selectbox("用哪一欄作為收件人識別？（例如「姓名」）", df.columns)
+    all_options = df[filter_column].astype(str).unique().tolist()
+    selected_names = st.multiselect(
+        "選擇需要生成的收件人（支援搜尋，不選則全部生成）",
+        options=all_options,
+        default=[],
+        placeholder="開始輸入搜尋或選擇..."
+    )
+    target_df = df[df[filter_column].astype(str).isin(selected_names)] if selected_names else df
+    st.write(f"將生成 **{len(target_df)}** 張個人化證書")
 
-    # 多欄位選擇與設定
-    st.subheader("📌 文字欄位設定")
-    selected_columns = st.multiselect("選擇要疊加的欄位（可多選）", df.columns)
+    # 多欄位選擇
+    st.subheader("📌 要疊加的欄位")
+    selected_columns = st.multiselect("選擇要顯示的欄位（可多選）", df.columns)
 
     if not selected_columns:
         st.warning("請至少選擇一個欄位！")
         st.stop()
 
-    # 儲存設定
+    # 每個欄位獨立設定
     if "settings" not in st.session_state:
         st.session_state.settings = {}
 
@@ -58,55 +63,56 @@ with left_col:
         if col not in st.session_state.settings:
             st.session_state.settings[col] = {
                 "x": background.width // 2,
-                "y": background.height // 2 + selected_columns.index(col) * 100,
+                "y": background.height // 2 + selected_columns.index(col) * 120,
                 "size": 80,
                 "color": "#000000",
                 "align": "中"
             }
 
-        st.markdown(f"**{col}**")
-        c1, c2, c3, c4, c5 = st.columns(5)
+        st.markdown(f"**{col}** 設定")
+        c1, c2 = st.columns(2)
         with c1:
-            st.session_state.settings[col]["x"] = st.number_input(f"X", 0, background.width, st.session_state.settings[col]["x"], key=f"x_{col}")
+            st.session_state.settings[col]["x"] = st.number_input(f"X 位置", 0, background.width, st.session_state.settings[col]["x"], key=f"x_{col}")
+            st.session_state.settings[col]["y"] = st.number_input(f"Y 位置", 0, background.height, st.session_state.settings[col]["y"], key=f"y_{col}")
         with c2:
-            st.session_state.settings[col]["y"] = st.number_input(f"Y", 0, background.height, st.session_state.settings[col]["y"], key=f"y_{col}")
-        with c3:
-            st.session_state.settings[col]["size"] = st.slider(f"大小", 20, 200, st.session_state.settings[col]["size"], key=f"size_{col}")
-        with c4:
+            st.session_state.settings[col]["size"] = st.slider(f"字體大小", 20, 200, st.session_state.settings[col]["size"], key=f"size_{col}")
             st.session_state.settings[col]["color"] = st.color_picker(f"顏色", st.session_state.settings[col]["color"], key=f"color_{col}")
-        with c5:
-            st.session_state.settings[col]["align"] = st.selectbox(f"對齊", ["左", "中", "右"], index=["左","中","右"].index(st.session_state.settings[col]["align"]), key=f"align_{col}")
+        st.session_state.settings[col]["align"] = st.selectbox(f"對齊方式", ["左", "中", "右"], index=["左","中","右"].index(st.session_state.settings[col]["align"]), key=f"align_{col}")
 
-    # 生成按鈕（放在左欄底部）
-    generate_btn = st.button("🔥 開始批量生成", type="primary", use_container_width=True)
+    # 預覽大小控制
+    st.subheader("🔍 預覽控制")
+    preview_scale = st.slider("預覽圖縮放比例（僅影響顯示，不影響生成品質）", 20, 200, 100, help="100% = 原圖大小")
 
-# 右欄：專屬預覽區
+    # 生成按鈕
+    generate_btn = st.button("🔥 開始批量生成所有證書", type="primary", use_container_width=True)
+
+# 右欄：大預覽區
 with right_col:
-    st.header("🔍 即時預覽工作區")
+    st.header("🔍 即時預覽區（調整即更新）")
+
     if len(target_df) > 0:
         preview_row = target_df.iloc[0]
         preview_img = background.copy()
         draw = ImageDraw.Draw(preview_img)
 
         # 載入字體
-        if font_file:
-            base_font = ImageFont.truetype(font_file, 80)
-        else:
-            try:
+        try:
+            if font_file:
+                base_font = ImageFont.truetype(font_file, 80)
+            else:
                 base_font = ImageFont.truetype("arial.ttf", 80)
-            except:
-                base_font = ImageFont.load_default()
-                st.warning("建議上傳 .ttf 字體避免亂碼")
+        except:
+            base_font = ImageFont.load_default()
+            st.warning("使用預設字體，可能中文亂碼，建議上傳 .ttf")
 
-        # 繪製所有欄位文字
+        # 繪製所有欄位
         for col in selected_columns:
             settings = st.session_state.settings[col]
             text = str(preview_row[col])
-
             try:
-                font = base_font.font_variant(size=settings["size"])
+                font = base_font.font_variant(size=settings["size"]) if hasattr(base_font, 'font_variant') else ImageFont.truetype(font_file or "arial.ttf", settings["size"])
             except:
-                font = ImageFont.truetype(font_file or "arial.ttf", settings["size"]) if font_file else ImageFont.load_default()
+                font = ImageFont.load_default()
 
             x = settings["x"]
             if settings["align"] == "中":
@@ -118,26 +124,30 @@ with right_col:
 
             draw.text((x, settings["y"]), text, font=font, fill=settings["color"])
 
-        # 預覽圖自動縮放填滿右欄
-        st.image(preview_img, caption="即時預覽（所有圖片將以此效果生成）", use_container_width=True)
-    else:
-        st.info("無資料可預覽")
+        # 按比例縮放預覽圖
+        if preview_scale != 100:
+            new_width = int(background.width * preview_scale / 100)
+            new_height = int(background.height * preview_scale / 100)
+            preview_img = preview_img.resize((new_width, new_height), Image.LANCZOS)
 
-# 生成邏輯（放在外面，點按鈕後執行）
+        # 顯示（自動適應欄寬 + 滾動）
+        st.image(preview_img, caption=f"預覽（{preview_scale}% 顯示，所有證書將以 100% 原圖生成）", use_container_width=True)
+
+# 生成邏輯
 if generate_btn:
-    with st.spinner("正在批量生成..."):
+    with st.spinner(f"正在生成 {len(target_df)} 張證書..."):
         output_images = []
         for idx, row in target_df.iterrows():
-            img = background.copy()
+            img = background.copy()  # 100% 原大小
             draw = ImageDraw.Draw(img)
 
             for col in selected_columns:
                 settings = st.session_state.settings[col]
                 text = str(row[col])
                 try:
-                    font = base_font.font_variant(size=settings["size"])
+                    font = base_font.font_variant(size=settings["size"]) if hasattr(base_font, 'font_variant') else ImageFont.truetype(font_file or "arial.ttf", settings["size"])
                 except:
-                    font = ImageFont.truetype(font_file or "arial.ttf", settings["size"]) if font_file else ImageFont.load_default()
+                    font = ImageFont.load_default()
 
                 final_x = settings["x"]
                 if settings["align"] == "中":
@@ -152,7 +162,7 @@ if generate_btn:
             buf = io.BytesIO()
             img.save(buf, format="PNG")
             buf.seek(0)
-            filename = f"證書_{idx+1}.png"
+            filename = f"證書_{row.get(filter_column, idx+1)}.png"
             output_images.append((filename, buf))
 
         zip_buffer = io.BytesIO()
@@ -162,8 +172,8 @@ if generate_btn:
                 zf.writestr(name, buf.read())
         zip_buffer.seek(0)
 
-        st.download_button("📥 下載所有圖片（ZIP）", zip_buffer, "certificates.zip", "application/zip")
-        st.success("生成完成！")
+        st.download_button("📥 下載所有證書（ZIP）", zip_buffer, "certificates.zip", "application/zip")
+        st.success("所有證書生成完成！")
         st.balloons()
 
-st.caption("安全私密：資料只在臨時環境處理，不儲存。")
+st.caption("安全．高效：類似 Mail Merge，快速產生個人化證書，資料不儲存。")
