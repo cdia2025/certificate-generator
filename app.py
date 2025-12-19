@@ -6,11 +6,13 @@ import zipfile
 import json
 import os
 import tempfile
+import requests
+from pathlib import Path
 
 st.set_page_config(page_title="Mail Merge 式證書生成器", layout="wide")
 
 st.title("✉️ Mail Merge 式多欄位證書生成器")
-st.markdown("**精準座標定位 + 中心對齊優化 + 自由調整預覽**")
+st.markdown("**精準定位 + 字體選擇 + 預覽優化**")
 
 # 主容器
 main_container = st.container()
@@ -82,16 +84,29 @@ with main_left:
     for col in selected_columns:
         if col not in st.session_state.settings:
             st.session_state.settings[col] = {
-                "x": bg_width // 2,  # 預設置中
+                "x": bg_width // 2,
                 "y": bg_height // 3 + selected_columns.index(col) * 100,
                 "size": 60,
                 "color": "#000000",
-                "align": "中",  # 預設置中對齊
+                "align": "中",
                 "bold": False,
-                "italic": False,
-                "anchor": "center"  # 使用英文，避免中文key問題
+                "italic": False
             }
 
+    # 字體選擇
+    st.subheader("🔤 字體設定")
+    font_options = {
+        "系統預設": "default",
+        "微軟正黑體": "msjh",
+        "標楷體": "dfkai",
+        "新細明體": "pmingliu",
+        "Arial": "arial",
+        "自訂字體": "custom"
+    }
+    
+    selected_font = st.selectbox("選擇字體", list(font_options.keys()), key="font_select")
+    custom_font_available = font_file is not None
+    
     # 欄位設定
     st.subheader("⚙️ 欄位詳細設定")
     
@@ -120,36 +135,16 @@ with main_left:
                         help=f"範圍: 0~{bg_height}, 置中點: {bg_height//2}"
                     )
                 
-                # 對齊方式與錨點
-                align_col1, align_col2 = st.columns(2)
-                with align_col1:
-                    align_options = ["左", "中", "右"]
-                    current_align_index = 0
-                    if st.session_state.settings[col]["align"] in align_options:
-                        current_align_index = align_options.index(st.session_state.settings[col]["align"])
-                    st.session_state.settings[col]["align"] = st.radio(
-                        "文字對齊", align_options, 
-                        index=current_align_index,
-                        key=f"align_{i}_{col}",
-                        horizontal=True
-                    )
-                with align_col2:
-                    anchor_options = ["left_top", "center", "right_bottom"]
-                    anchor_labels = ["左上", "中心", "右下"]
-                    current_anchor = st.session_state.settings[col]["anchor"]
-                    current_anchor_index = 0
-                    if current_anchor in anchor_options:
-                        current_anchor_index = anchor_options.index(current_anchor)
-                    
-                    selected_anchor_index = st.radio(
-                        "錨點", anchor_labels, 
-                        index=current_anchor_index,
-                        key=f"anchor_{i}_{col}",
-                        horizontal=True
-                    )
-                    # 轉換回英文key
-                    st.session_state.settings[col]["anchor"] = anchor_options[current_anchor_index]
-
+                # 對齊方式
+                align_options = ["左", "中", "右"]
+                current_align_index = align_options.index(st.session_state.settings[col]["align"]) if st.session_state.settings[col]["align"] in align_options else 0
+                st.session_state.settings[col]["align"] = st.radio(
+                    "文字對齊", align_options, 
+                    index=current_align_index,
+                    key=f"align_{i}_{col}",
+                    horizontal=True
+                )
+                
                 # 字體設定
                 font1, font2 = st.columns(2)
                 with font1:
@@ -179,20 +174,12 @@ with main_left:
                         value=st.session_state.settings[col]["italic"], 
                         key=f"italic_{i}_{col}"
                     )
-                
-                # 座標計算說明
-                align_desc = {
-                    "左": "左對齊：文字從指定 X 座標開始",
-                    "中": "置中對齊：文字以指定 X 座標為中心",
-                    "右": "右對齊：文字在指定 X 座標結束"
-                }
-                st.caption(f"說明：{align_desc.get(st.session_state.settings[col]['align'], '未設定')}")
 
     # 配置管理
     st.subheader("💾 配置管理")
-    config_col1, config_col2 = st.columns(2)
+    config_col1, config_col2, config_col3 = st.columns(3)
     with config_col1:
-        config_data = {"settings": st.session_state.settings, "selected_columns": selected_columns}
+        config_data = {"settings": st.session_state.settings, "selected_columns": selected_columns, "selected_font": selected_font}
         st.download_button(
             "💾 保存配置",
             data=json.dumps(config_data, ensure_ascii=False, indent=2),
@@ -200,19 +187,25 @@ with main_left:
             mime="application/json"
         )
     with config_col2:
-        uploaded_config = st.file_uploader("📁 載入配置", type=["json"], key="config_upload")
+        uploaded_config = st.file_uploader("📁 載入配置", type=["json"], key="config_load")
         if uploaded_config:
             try:
                 loaded_config = json.load(uploaded_config)
-                # 更新設定，保持向後兼容
                 for col_key, settings_val in loaded_config["settings"].items():
                     if col_key not in st.session_state.settings:
                         st.session_state.settings[col_key] = settings_val
                     else:
                         st.session_state.settings[col_key].update(settings_val)
+                if "selected_font" in loaded_config:
+                    st.session_state.selected_font_from_config = loaded_config["selected_font"]
                 st.success("配置載入成功！")
             except Exception as e:
                 st.error(f"配置載入失敗：{str(e)}")
+    with config_col3:
+        if st.button("🗑️ 清空記憶", key="clear_settings"):
+            st.session_state.settings = {}
+            st.success("設定已清空！")
+            st.rerun()
 
     # 預覽控制
     st.subheader("🔍 預覽控制")
@@ -232,7 +225,7 @@ with main_left:
     if st.button("🚀 開始生成", type="primary", use_container_width=True):
         st.session_state.generate_clicked = True
 
-# 右側預覽區域
+# 右側預覽區域 - 使用新的處理方式
 with main_right:
     st.header("👁️ 即時預覽")
     
@@ -240,34 +233,55 @@ with main_right:
         preview_row = target_df.iloc[0]
         
         # 字體載入函數
-        def load_font(size):
+        def load_font(size, font_type="default"):
             try:
-                if font_file:
+                # 如果用戶上傳了自定義字體
+                if custom_font_available and font_type == "custom":
                     with tempfile.NamedTemporaryFile(delete=False, suffix='.ttf') as tmp_font:
                         tmp_font.write(font_file.getvalue())
                         return ImageFont.truetype(tmp_font.name, size)
-                else:
-                    # 系統字體嘗試順序
+                
+                # 根據選擇的字體類型
+                if font_type == "msjh":  # 微軟正黑體
                     font_paths = [
-                        "/System/Library/Fonts/Arial Unicode.ttf",  # macOS
-                        "/System/Library/Fonts/Helvetica.ttc",     # macOS
-                        "C:/Windows/Fonts/msyh.ttc",               # Windows 中易黑體
-                        "C:/Windows/Fonts/simhei.ttf",             # Windows 黑體
-                        "C:/Windows/Fonts/msyhbd.ttc",             # Windows 粗體黑體
-                        "C:/Windows/Fonts/arial.ttf",              # Windows Arial
-                        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",  # Linux
-                        "/usr/share/fonts/TTF/DejaVuSans.ttf"      # Linux alternative
+                        "C:/Windows/Fonts/msjh.ttc", "C:/Windows/Fonts/msjhbd.ttc",
+                        "/System/Library/Fonts/Helvetica.ttc", "/System/Library/Fonts/Arial Unicode.ttf"
                     ]
-                    for font_path in font_paths:
-                        if os.path.exists(font_path):
-                            try:
-                                return ImageFont.truetype(font_path, size)
-                            except:
-                                continue
+                elif font_type == "dfkai":  # 標楷體
+                    font_paths = [
+                        "C:/Windows/Fonts/DFKai-SB.ttf", "/System/Library/Fonts/Kaiti.ttc"
+                    ]
+                elif font_type == "pmingliu":  # 新細明體
+                    font_paths = [
+                        "C:/Windows/Fonts/pmingliu.ttc", "C:/Windows/Fonts/pmingliub.ttc"
+                    ]
+                elif font_type == "arial":
+                    font_paths = [
+                        "C:/Windows/Fonts/arial.ttf", "/System/Library/Fonts/Arial.ttf",
+                        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+                    ]
+                else:
+                    font_paths = [
+                        "/System/Library/Fonts/Arial Unicode.ttf", "C:/Windows/Fonts/msyh.ttc",
+                        "C:/Windows/Fonts/simhei.ttf", "C:/Windows/Fonts/arial.ttf",
+                        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+                    ]
+                
+                for font_path in font_paths:
+                    if os.path.exists(font_path):
+                        try:
+                            return ImageFont.truetype(font_path, size)
+                        except:
+                            continue
+                
+                # 如果都找不到，返回默認字體
+                return ImageFont.load_default()
             except:
-                pass
-            return ImageFont.load_default()
+                return ImageFont.load_default()
 
+        # 獲取當前字體類型
+        current_font_type = font_options[selected_font]
+        
         # 創建預覽圖片
         preview_img = background.copy()
         draw = ImageDraw.Draw(preview_img)
@@ -279,7 +293,7 @@ with main_right:
                 text = str(preview_row[col])
                 
                 # 載入字體
-                font = load_font(settings["size"])
+                font = load_font(settings["size"], current_font_type)
                 
                 # 計算文字尺寸
                 try:
@@ -298,31 +312,22 @@ with main_right:
                 elif settings["align"] == "右":
                     final_x = settings["x"] - text_width
                 
-                # 根據錨點調整 Y 座標
-                final_y = settings["y"]
-                if settings["anchor"] == "center":
-                    final_y = settings["y"] - text_height // 2
-                elif settings["anchor"] == "right_bottom":
-                    final_y = settings["y"] - text_height
-                
                 # 繪製粗體效果
                 if settings["bold"]:
                     for dx in [-1, 0, 1]:
                         for dy in [-1, 0, 1]:
                             if dx != 0 or dy != 0:
-                                draw.text((final_x + dx, final_y + dy), 
+                                draw.text((final_x + dx, settings["y"] + dy), 
                                         text, font=font, fill=settings["color"])
                 
                 # 繪製主文字
-                draw.text((final_x, final_y), text, font=font, fill=settings["color"])
+                draw.text((final_x, settings["y"]), text, font=font, fill=settings["color"])
                 
-                # 繪製定位參考線（虛線）
-                # 水平線
-                draw.line([(0, final_y), (bg_width, final_y)], fill="#FF0000", width=1)
-                # 垂直線
-                draw.line([(final_x, 0), (final_x, bg_height)], fill="#0000FF", width=1)
+                # 繪製定位參考線
+                draw.line([(0, settings["y"]), (bg_width, settings["y"])], fill="#FF0000", width=1)
+                draw.line([(final_x + text_width//2, 0), (final_x + text_width//2, bg_height)], fill="#0000FF", width=1)
 
-        # 計算顯示尺寸
+        # 計算顯示尺寸 - 改進預覽顯示
         aspect_ratio = bg_height / bg_width
         display_width = min(max_display_width, bg_width)
         display_height = int(display_width * aspect_ratio)
@@ -330,9 +335,12 @@ with main_right:
         # 縮放並顯示預覽
         scaled_preview = preview_img.resize((display_width, display_height), Image.LANCZOS)
         
-        st.image(scaled_preview, 
-                caption=f"預覽 ({preview_scale}% | {display_width}×{display_height}px)", 
-                use_column_width=True)
+        # 使用容器確保預覽區域穩定
+        preview_container = st.container()
+        with preview_container:
+            st.image(scaled_preview, 
+                    caption=f"預覽 ({preview_scale}% | {display_width}×{display_height}px)", 
+                    use_column_width=True)
         
         # 顯示當前資料和座標信息
         st.subheader("📋 預覽資料 & 座標信息")
@@ -351,14 +359,12 @@ with main_right:
                 text = str(preview_row[col])
                 
                 # 重新計算實際座標
-                font = load_font(settings["size"])
+                font = load_font(settings["size"], current_font_type)
                 try:
                     bbox = draw.textbbox((0, 0), text, font=font)
                     text_width = bbox[2] - bbox[0]
-                    text_height = bbox[3] - bbox[1]
                 except:
                     text_width = len(text) * settings["size"] * 0.6
-                    text_height = settings["size"]
                 
                 actual_x = settings["x"]
                 if settings["align"] == "中":
@@ -366,13 +372,7 @@ with main_right:
                 elif settings["align"] == "右":
                     actual_x = settings["x"] - text_width
                 
-                actual_y = settings["y"]
-                if settings["anchor"] == "center":
-                    actual_y = settings["y"] - text_height // 2
-                elif settings["anchor"] == "right_bottom":
-                    actual_y = settings["y"] - text_height
-                
-                st.write(f"{col}: ({actual_x:.0f}, {actual_y:.0f})")
+                st.write(f"{col}: ({actual_x:.0f}, {settings['y']})")
 
 # 生成功能
 if hasattr(st.session_state, 'generate_clicked') and st.session_state.generate_clicked:
@@ -382,6 +382,9 @@ if hasattr(st.session_state, 'generate_clicked') and st.session_state.generate_c
         
         progress_bar = st.progress(0)
         status_text = st.empty()
+        
+        # 獲取字體類型
+        current_font_type = font_options[selected_font]
         
         for idx, row in target_df.iterrows():
             status_text.text(f"生成中... ({idx+1}/{total_count})")
@@ -397,7 +400,7 @@ if hasattr(st.session_state, 'generate_clicked') and st.session_state.generate_c
                     text = str(row[col])
                     
                     # 載入字體
-                    font = load_font(settings["size"])
+                    font = load_font(settings["size"], current_font_type)
                     
                     # 計算文字尺寸
                     try:
@@ -415,22 +418,16 @@ if hasattr(st.session_state, 'generate_clicked') and st.session_state.generate_c
                     elif settings["align"] == "右":
                         final_x = settings["x"] - text_width
                     
-                    final_y = settings["y"]
-                    if settings["anchor"] == "center":
-                        final_y = settings["y"] - text_height // 2
-                    elif settings["anchor"] == "right_bottom":
-                        final_y = settings["y"] - text_height
-                    
                     # 繪製粗體效果
                     if settings["bold"]:
                         for dx in [-1, 0, 1]:
                             for dy in [-1, 0, 1]:
                                 if dx != 0 or dy != 0:
-                                    draw.text((final_x + dx, final_y + dy), 
+                                    draw.text((final_x + dx, settings["y"] + dy), 
                                             text, font=font, fill=settings["color"])
                     
                     # 繪製主文字
-                    draw.text((final_x, final_y), text, font=font, fill=settings["color"])
+                    draw.text((final_x, settings["y"]), text, font=font, fill=settings["color"])
             
             # 保存圖片
             buf = io.BytesIO()
@@ -463,5 +460,13 @@ if hasattr(st.session_state, 'generate_clicked') and st.session_state.generate_c
         
         # 重置生成狀態
         delattr(st.session_state, 'generate_clicked')
+
+st.markdown("---")
+st.markdown("""
+### 💾 GitHub 存儲
+程式碼可在 GitHub 上獲取：
+- [GitHub Repository](https://github.com/yourusername/certificate-generator)
+- 支持 Star 和 Fork
+""")
 
 st.caption("🔒 資料僅在本機處理，不會上傳至任何地方")
