@@ -1,4 +1,5 @@
 import streamlit as st
+import pandas as pd  # 確保這行在最上面
 from PIL import Image, ImageDraw, ImageFont
 import io
 import zipfile
@@ -8,33 +9,39 @@ st.set_page_config(page_title="Mail Merge 式證書生成器", layout="wide")
 st.title("✉️ Mail Merge 式多欄位證書生成器")
 st.markdown("**像 Word Mail Merge 一樣：選取特定人員 + 多欄位疊加 + 即時大預覽（大小可調）**")
 
-# 左右分欄：左設定 (40%)，右預覽 (60%)
+# 左右分欄
 left_col, right_col = st.columns([2, 3])
 
 with left_col:
     st.header("🛠️ 設定區")
 
-    # 上傳背景圖片
+    # 1. 上傳背景圖片
     background_file = st.file_uploader("上傳背景圖片模板（JPG/PNG，必填）", type=["jpg", "png", "jpeg"])
     if not background_file:
         st.stop()
     background = Image.open(background_file)
 
-    # 上傳資料檔
+    # 2. 上傳資料檔
     data_file = st.file_uploader("上傳資料檔（CSV 或 Excel，必填）", type=["csv", "xlsx", "xls"])
     if not data_file:
+        st.info("請上傳資料檔後繼續")
         st.stop()
-    if data_file.name.endswith(".csv"):
-        df = pd.read_csv(data_file)
-    else:
-        df = pd.read_excel(data_file)
 
-    st.success(f"資料上傳成功！共 {len(df)} 筆")
+    # 正確讀取資料（關鍵修復處）
+    try:
+        if data_file.name.lower().endswith(".csv"):
+            df = pd.read_csv(data_file)
+        else:  # .xlsx 或 .xls
+            df = pd.read_excel(data_file)
+        st.success(f"資料上傳成功！共 {len(df)} 筆記錄")
+    except Exception as e:
+        st.error(f"讀取資料檔失敗：{str(e)}")
+        st.stop()
 
-    # 上傳字體（可選）
+    # 3. 上傳字體（可選）
     font_file = st.file_uploader("（可選）上傳中文字體檔（.ttf，避免亂碼）", type=["ttf"])
 
-    # Mail Merge 式人員選擇
+    # 4. Mail Merge 人員選擇
     st.subheader("✉️ Mail Merge 人員選擇")
     filter_column = st.selectbox("用哪一欄作為收件人識別？（例如「姓名」）", df.columns)
     all_options = df[filter_column].astype(str).unique().tolist()
@@ -47,7 +54,7 @@ with left_col:
     target_df = df[df[filter_column].astype(str).isin(selected_names)] if selected_names else df
     st.write(f"將生成 **{len(target_df)}** 張個人化證書")
 
-    # 多欄位選擇
+    # 5. 多欄位選擇
     st.subheader("📌 要疊加的欄位")
     selected_columns = st.multiselect("選擇要顯示的欄位（可多選）", df.columns)
 
@@ -55,7 +62,7 @@ with left_col:
         st.warning("請至少選擇一個欄位！")
         st.stop()
 
-    # 每個欄位獨立設定
+    # 儲存設定
     if "settings" not in st.session_state:
         st.session_state.settings = {}
 
@@ -79,14 +86,14 @@ with left_col:
             st.session_state.settings[col]["color"] = st.color_picker(f"顏色", st.session_state.settings[col]["color"], key=f"color_{col}")
         st.session_state.settings[col]["align"] = st.selectbox(f"對齊方式", ["左", "中", "右"], index=["左","中","右"].index(st.session_state.settings[col]["align"]), key=f"align_{col}")
 
-    # 預覽大小控制
+    # 6. 預覽大小控制
     st.subheader("🔍 預覽控制")
-    preview_scale = st.slider("預覽圖縮放比例（僅影響顯示，不影響生成品質）", 20, 200, 100, help="100% = 原圖大小")
+    preview_scale = st.slider("預覽圖縮放比例（僅影響顯示，不影響生成品質）", 20, 200, 100)
 
     # 生成按鈕
     generate_btn = st.button("🔥 開始批量生成所有證書", type="primary", use_container_width=True)
 
-# 右欄：大預覽區
+# 右欄：即時預覽區
 with right_col:
     st.header("🔍 即時預覽區（調整即更新）")
 
@@ -103,14 +110,15 @@ with right_col:
                 base_font = ImageFont.truetype("arial.ttf", 80)
         except:
             base_font = ImageFont.load_default()
-            st.warning("使用預設字體，可能中文亂碼，建議上傳 .ttf")
+            if font_file is None:
+                st.warning("未上傳字體，使用預設（可能中文亂碼），建議上傳 .ttf")
 
         # 繪製所有欄位
         for col in selected_columns:
             settings = st.session_state.settings[col]
             text = str(preview_row[col])
             try:
-                font = base_font.font_variant(size=settings["size"]) if hasattr(base_font, 'font_variant') else ImageFont.truetype(font_file or "arial.ttf", settings["size"])
+                font = base_font.font_variant(size=settings["size"]) if hasattr(base_font, 'font_variant') else ImageFont.truetype(font_file or "arial.ttf", settings["size"]) if font_file else base_font
             except:
                 font = ImageFont.load_default()
 
@@ -124,28 +132,38 @@ with right_col:
 
             draw.text((x, settings["y"]), text, font=font, fill=settings["color"])
 
-        # 按比例縮放預覽圖
+        # 縮放預覽圖
         if preview_scale != 100:
             new_width = int(background.width * preview_scale / 100)
             new_height = int(background.height * preview_scale / 100)
             preview_img = preview_img.resize((new_width, new_height), Image.LANCZOS)
 
-        # 顯示（自動適應欄寬 + 滾動）
-        st.image(preview_img, caption=f"預覽（{preview_scale}% 顯示，所有證書將以 100% 原圖生成）", use_container_width=True)
+        st.image(preview_img, caption=f"即時預覽（顯示 {preview_scale}%）", use_container_width=True)
+    else:
+        st.info("無資料可預覽")
 
 # 生成邏輯
 if generate_btn:
     with st.spinner(f"正在生成 {len(target_df)} 張證書..."):
         output_images = []
+        # 重置字體（生成時用原大小）
+        try:
+            if font_file:
+                gen_base_font = ImageFont.truetype(font_file, 80)
+            else:
+                gen_base_font = ImageFont.truetype("arial.ttf", 80)
+        except:
+            gen_base_font = ImageFont.load_default()
+
         for idx, row in target_df.iterrows():
-            img = background.copy()  # 100% 原大小
+            img = background.copy()
             draw = ImageDraw.Draw(img)
 
             for col in selected_columns:
                 settings = st.session_state.settings[col]
                 text = str(row[col])
                 try:
-                    font = base_font.font_variant(size=settings["size"]) if hasattr(base_font, 'font_variant') else ImageFont.truetype(font_file or "arial.ttf", settings["size"])
+                    font = gen_base_font.font_variant(size=settings["size"]) if hasattr(gen_base_font, 'font_variant') else ImageFont.truetype(font_file or "arial.ttf", settings["size"]) if font_file else gen_base_font
                 except:
                     font = ImageFont.load_default()
 
@@ -162,7 +180,8 @@ if generate_btn:
             buf = io.BytesIO()
             img.save(buf, format="PNG")
             buf.seek(0)
-            filename = f"證書_{row.get(filter_column, idx+1)}.png"
+            safe_name = str(row.get(filter_column, idx+1)).replace("/", "_").replace("\\", "_")
+            filename = f"證書_{safe_name}.png"
             output_images.append((filename, buf))
 
         zip_buffer = io.BytesIO()
