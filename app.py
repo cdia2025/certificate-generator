@@ -11,7 +11,7 @@ import requests
 # ==========================================
 # 1. 系統初始化與頁面設定
 # ==========================================
-st.set_page_config(page_title="專業證書生成器 V5.6 安全修復版", layout="wide")
+st.set_page_config(page_title="專業證書生成器 V5.7 座標優化版", layout="wide")
 
 if "settings" not in st.session_state:
     st.session_state.settings = {}
@@ -37,7 +37,7 @@ def get_font_resource():
     if not os.path.exists(target_path):
         url = "https://github.com/googlefonts/noto-cjk/raw/main/Sans/OTF/TraditionalChinese/NotoSansCJKtc-Regular.otf"
         try:
-            with st.spinner("正在初始化中文字體庫..."):
+            with st.spinner("正在下載中文字體庫..."):
                 r = requests.get(url, timeout=20)
                 with open(target_path, "wb") as f: f.write(r.content)
             return target_path
@@ -84,18 +84,19 @@ def draw_styled_text(draw, text, pos, font, color, align="居中", bold=False, i
 # ==========================================
 # 3. 檔案上傳區
 # ==========================================
-st.title("✉️ 專業證書生成器 V5.6")
+st.title("✉️ 專業證書生成器 V5.7")
 
 up1, up2 = st.columns(2)
 with up1: bg_file = st.file_uploader("🖼️ 1. 上傳證書背景圖", type=["jpg", "png", "jpeg"], key="main_bg")
-with up2: data_file = st.file_uploader("📊 2. 上傳資料檔 (Excel/CSV)", type=["xlsx", "csv"], key="main_data")
+with up2: data_file = st.file_uploader("📊 2. 上傳資料檔", type=["xlsx", "csv"], key="main_data")
 
 if not bg_file or not data_file:
-    st.info("💡 提示：上傳檔案後，使用左側「側邊欄」調整。側邊欄邊界可滑鼠拖拽寬度。")
+    st.info("💡 提示：使用左側「側邊欄」進行詳細設定，側邊欄可調整闊度。")
     st.stop()
 
 bg_img = Image.open(bg_file).convert("RGBA")
-W, H = float(bg_img.size[0]), float(bg_img.size[1]) # 轉為 float 確保與 slider 類型一致
+W, H = float(bg_img.size[0]), float(bg_img.size[1])
+mid_x, mid_y = W / 2, H / 2
 df = pd.read_excel(data_file) if data_file.name.endswith('xlsx') else pd.read_csv(data_file)
 
 # ==========================================
@@ -115,34 +116,28 @@ with st.sidebar:
 
     display_cols = st.multiselect("顯示欄位", df.columns, default=[df.columns[0]])
     
-    # 確保每個欄位都有設定且數值在邊界內
+    # 補全參數與鉗制
     for col in display_cols:
         if col not in st.session_state.settings:
-            st.session_state.settings[col] = {"x": W/2, "y": H/2, "size": 60, "color": "#000000", "align": "居中", "bold": False, "italic": False}
+            st.session_state.settings[col] = {"x": mid_x, "y": mid_y, "size": 60, "color": "#000000", "align": "居中", "bold": False, "italic": False}
         else:
-            # 安全防護：補全缺失參數並強制鉗制座標在當前圖片範圍內
             s_dict = st.session_state.settings[col]
-            s_dict["x"] = max(0.0, min(W, float(s_dict.get("x", W/2))))
-            s_dict["y"] = max(0.0, min(H, float(s_dict.get("y", H/2))))
-            if "size" not in s_dict: s_dict["size"] = 60
-            if "color" not in s_dict: s_dict["color"] = "#000000"
-            if "align" not in s_dict: s_dict["align"] = "居中"
-            if "bold" not in s_dict: s_dict["bold"] = False
-            if "italic" not in s_dict: s_dict["italic"] = False
+            s_dict["x"] = max(0.0, min(W, float(s_dict.get("x", mid_x))))
+            s_dict["y"] = max(0.0, min(H, float(s_dict.get("y", mid_y))))
 
     st.divider()
 
-    # --- Photoshop 批量工具 (加入邊界防護) ---
+    # --- Photoshop 批量工具 (加入中位數提示) ---
     with st.expander("🔗 Photoshop 批量連結工具", expanded=True):
-        st.session_state.linked_layers = st.multiselect("選取要同時移動的欄位", display_cols)
+        st.caption(f"📍 畫布中位數參考：X={mid_x:.1f}, Y={mid_y:.1f}")
+        st.session_state.linked_layers = st.multiselect("連結圖層", display_cols)
         lc1, lc2 = st.columns(2)
-        with lc1: b_x = st.number_input("左右位移 (px)", value=0.0)
-        with lc2: b_y = st.number_input("上下位移 (px)", value=0.0)
-        b_s = st.number_input("字體縮放", value=0)
+        with lc1: b_x = st.number_input("批量 X 位移", value=0.0)
+        with lc2: b_y = st.number_input("批量 Y 位移", value=0.0)
+        b_s = st.number_input("批量字體縮放", value=0)
         
         if st.button("✅ 執行批量套用", use_container_width=True):
             for c in st.session_state.linked_layers:
-                # 運算並進行範圍鉗制
                 nx = max(0.0, min(W, float(st.session_state.settings[c]["x"] + b_x)))
                 ny = max(0.0, min(H, float(st.session_state.settings[c]["y"] + b_y)))
                 ns = max(10, min(1000, int(st.session_state.settings[c]["size"] + b_s)))
@@ -151,50 +146,68 @@ with st.sidebar:
                 st.session_state.settings[c]["y"] = ny
                 st.session_state.settings[c]["size"] = ns
                 
-                # 同步更新內部 Key，確保 Slider 讀取正確
-                st.session_state[f"x_{c}"] = nx
-                st.session_state[f"y_{c}"] = ny
-                st.session_state[f"s_{c}"] = ns
+                # 同步更新 Key
+                st.session_state[f"x_num_{c}"] = nx
+                st.session_state[f"y_num_{c}"] = ny
+                st.session_state[f"x_sl_{c}"] = nx
+                st.session_state[f"y_sl_{c}"] = ny
+                st.session_state[f"s_num_{c}"] = ns
             st.rerun()
 
     st.divider()
 
-    # --- 單獨圖層設定 (加入邊界防護) ---
+    # --- 單獨圖層設定 (加入數值輸入與中位數提示) ---
     st.subheader("📝 單獨圖層設定")
     for col in display_cols:
         link_tag = " (🔗)" if col in st.session_state.linked_layers else ""
         with st.expander(f"圖層：{col}{link_tag}"):
             s = st.session_state.settings[col]
             
-            # 渲染 Slider 前再次確認數值合法，避免崩潰
-            cur_x = max(0.0, min(W, float(s["x"])))
-            cur_y = max(0.0, min(H, float(s["y"])))
+            # 中位數提示
+            st.caption(f"📍 建議中位數：X={mid_x:.1f}, Y={mid_y:.1f}")
             
-            s["x"] = st.slider(f"X 座標", 0.0, W, cur_x, key=f"x_{col}")
-            s["y"] = st.slider(f"Y 座標", 0.0, H, cur_y, key=f"y_{col}")
-            s["size"] = st.number_input(f"字體大小", 10, 1000, int(s["size"]), key=f"s_{col}")
-            s["color"] = st.color_picker(f"文字顏色", s["color"], key=f"c_{col}")
+            # X 座標控制
+            cx1, cx2 = st.columns([1, 2])
+            with cx1:
+                s["x"] = st.number_input("X 數值", 0.0, W, float(s["x"]), key=f"x_num_{col}")
+            with cx2:
+                s["x"] = st.slider("X 滑桿", 0.0, W, float(s["x"]), key=f"x_sl_{col}", label_visibility="collapsed")
+            
+            # Y 座標控制
+            cy1, cy2 = st.columns([1, 2])
+            with cy1:
+                s["y"] = st.number_input("Y 數值", 0.0, H, float(s["y"]), key=f"y_num_{col}")
+            with cy2:
+                s["y"] = st.slider("Y 滑桿", 0.0, H, float(s["y"]), key=f"y_sl_{col}", label_visibility="collapsed")
+            
+            # 字體與顏色
+            st.divider()
+            c_f1, c_f2 = st.columns([1, 1])
+            with c_f1:
+                s["size"] = st.number_input("字體大小", 10, 1000, int(s["size"]), key=f"s_num_{col}")
+            with c_f2:
+                s["color"] = st.color_picker("顏色", s["color"], key=f"c_p_{col}")
             
             sc1, sc2 = st.columns(2)
             with sc1: s["bold"] = st.checkbox("粗體", s["bold"], key=f"b_{col}")
             with sc2: s["italic"] = st.checkbox("斜體", s["italic"], key=f"i_{col}")
             
             opts = ["左對齊", "居中", "右對齊"]
-            s["align"] = st.selectbox(f"對齊方式", opts, index=opts.index(s["align"]), key=f"a_{col}")
+            s["align"] = st.selectbox(f"對齊", opts, index=opts.index(s["align"]), key=f"a_{col}")
 
 # ==========================================
 # 5. 主頁面：預覽與畫布
 # ==========================================
 st.divider()
-p1, p2 = st.columns([1, 1])
-with p1: id_col = st.selectbox("命名依據欄位", df.columns)
-with p2:
+cp1, cp2 = st.columns([1, 1])
+with cp1: id_col = st.selectbox("命名依據欄位", df.columns)
+with cp2:
     all_n = df[id_col].astype(str).tolist()
     sel_n = st.multiselect("預覽名單", all_n, default=all_n[:1])
     target_df = df[df[id_col].astype(str).isin(sel_n)]
 
 st.subheader("👁️ 畫布即時預覽")
-zoom = st.slider("🔍 視覺縮放 (%)", 50, 250, 100, step=10, key="zoom_sl")
+zoom = st.slider("🔍 畫布縮放 (%)", 50, 250, 100, step=10, key="zoom_sl")
 
 if not target_df.empty:
     row_data = target_df.iloc[0]
@@ -202,15 +215,14 @@ if not target_df.empty:
     draw = ImageDraw.Draw(canvas)
     
     for col in display_cols:
-        set_val = st.session_state.settings[col]
-        font_obj = get_font_object(set_val["size"])
-        res = draw_styled_text(draw, str(row_data[col]), (set_val["x"], set_val["y"]), font_obj, set_val["color"], set_val["align"], set_val["bold"], set_val["italic"])
-        if res:
-            canvas.alpha_composite(res[0], dest=res[1])
+        sv = st.session_state.settings[col]
+        f_obj = get_font_object(sv["size"])
+        res = draw_styled_text(draw, str(row_data[col]), (sv["x"], sv["y"]), f_obj, sv["color"], sv["align"], sv["bold"], sv["italic"])
+        if res: canvas.alpha_composite(res[0], dest=res[1])
         
         guide_c = "#FF0000BB" if col in st.session_state.linked_layers else "#0000FF44"
-        draw.line([(0, set_val["y"]), (W, set_val["y"])], fill=guide_c, width=2)
-        draw.line([(set_val["x"], 0), (set_val["x"], H)], fill=guide_c, width=2)
+        draw.line([(0, sv["y"]), (W, sv["y"])], fill=guide_c, width=2)
+        draw.line([(sv["x"], 0), (sv["x"], H)], fill=guide_c, width=2)
 
     st.image(canvas, width=int(W * (zoom / 100)))
 
@@ -236,4 +248,4 @@ if st.button("🚀 開始批量製作選定證書", type="primary", use_containe
                 f_img.convert("RGB").save(img_io, format="JPEG", quality=95)
                 zf.writestr(f"{str(row[id_col])}.jpg", img_io.getvalue())
                 prog.progress((idx + 1) / len(target_df))
-        st.download_button("📥 下載 ZIP 檔", zip_buf.getvalue(), "certs.zip", "application/zip", use_container_width=True)
+        st.download_button("📥 下載 ZIP 打包檔", zip_buf.getvalue(), "certificates.zip", "application/zip", use_container_width=True)
