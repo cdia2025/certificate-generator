@@ -11,7 +11,7 @@ import requests
 # ==========================================
 # 1. 頁面設定與系統初始化
 # ==========================================
-st.set_page_config(page_title="專業證書生成器 V5.9.2 修正版", layout="wide")
+st.set_page_config(page_title="專業證書生成器 V5.9.3", layout="wide")
 
 # --- 重置專案功能 ---
 def reset_project():
@@ -100,7 +100,7 @@ def draw_styled_text(draw, text, pos, font, color, align="居中", bold=False, i
 # ==========================================
 # 3. 檔案上傳區
 # ==========================================
-st.title("✉️ 專業證書生成器 V5.9.2")
+st.title("✉️ 專業證書生成器 V5.9.3")
 
 up1, up2 = st.columns(2)
 with up1: bg_file = st.file_uploader("🖼️ 1. 上傳背景圖片", type=["jpg", "png", "jpeg"], key="main_bg")
@@ -152,30 +152,7 @@ with st.sidebar:
 
     st.divider()
 
-    # --- Photoshop 批量工具 ---
-    with st.expander("🔗 批量連結與位移", expanded=True):
-        st.info(f"📍 中心點參考：X={mid_x:.1f}, Y={mid_y:.1f}")
-        st.session_state.linked_layers = st.multiselect("連結對象", display_cols)
-        lc1, lc2 = st.columns(2)
-        with lc1: b_x = st.number_input("批量 X 位移", value=0.0, key="batch_x")
-        with lc2: b_y = st.number_input("批量 Y 位移", value=0.0, key="batch_y")
-        b_s = st.number_input("批量縮放大小", value=0, key="batch_s")
-        
-        if st.button("✅ 執行批量套用", use_container_width=True):
-            for c in st.session_state.linked_layers:
-                nx = max(0.0, min(W, float(st.session_state.settings[c]["x"] + b_x)))
-                ny = max(0.0, min(H, float(st.session_state.settings[c]["y"] + b_y)))
-                ns = max(10, min(1000, int(st.session_state.settings[c]["size"] + b_s)))
-                st.session_state.settings[c].update({"x": nx, "y": ny, "size": ns})
-                st.session_state[f"num_x_{c}"] = nx
-                st.session_state[f"sl_x_{c}"] = nx
-                st.session_state[f"num_y_{c}"] = ny
-                st.session_state[f"sl_y_{c}"] = ny
-            st.rerun()
-
-    st.divider()
-
-    # --- 單獨圖層調整 ---
+    # --- 單獨圖層調整 (現在位於上方) ---
     st.subheader("📝 圖層屬性設定")
     for col in display_cols:
         tag = " (🔗)" if col in st.session_state.linked_layers else ""
@@ -205,6 +182,29 @@ with st.sidebar:
             opts = ["左對齊", "居中", "右對齊"]
             s["align"] = st.selectbox(f"對齊", opts, index=opts.index(s["align"]), key=f"al_{col}")
 
+    st.divider()
+
+    # --- Photoshop 批量工具 (現在移至下方，且預設閉合) ---
+    with st.expander("🔗 批量連結與位移工具", expanded=False):
+        st.info(f"📍 中心點參考：X={mid_x:.1f}, Y={mid_y:.1f}")
+        st.session_state.linked_layers = st.multiselect("選取要同時移動的對象", display_cols)
+        lc1, lc2 = st.columns(2)
+        with lc1: b_x = st.number_input("批量 X 位移", value=0.0, key="batch_x")
+        with lc2: b_y = st.number_input("批量 Y 位移", value=0.0, key="batch_y")
+        b_s = st.number_input("批量縮放大小", value=0, key="batch_s")
+        
+        if st.button("✅ 執行批量套用", use_container_width=True):
+            for c in st.session_state.linked_layers:
+                nx = max(0.0, min(W, float(st.session_state.settings[c]["x"] + b_x)))
+                ny = max(0.0, min(H, float(st.session_state.settings[c]["y"] + b_y)))
+                ns = max(10, min(1000, int(st.session_state.settings[c]["size"] + b_s)))
+                st.session_state.settings[c].update({"x": nx, "y": ny, "size": ns})
+                st.session_state[f"num_x_{c}"] = nx
+                st.session_state[f"sl_x_{c}"] = nx
+                st.session_state[f"num_y_{c}"] = ny
+                st.session_state[f"sl_y_{c}"] = ny
+            st.rerun()
+
 # ==========================================
 # 5. 主頁面：預覽與畫布
 # ==========================================
@@ -224,6 +224,7 @@ if not target_df.empty:
     canvas = bg_img.copy()
     draw = ImageDraw.Draw(canvas)
     for col in display_cols:
+        # 抓取連動的最新座標
         cur_x = st.session_state[f"num_x_{col}"]
         cur_y = st.session_state[f"num_y_{col}"]
         sv = st.session_state.settings[col]
