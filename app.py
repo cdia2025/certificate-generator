@@ -6,7 +6,6 @@ import zipfile
 import json
 import os
 import tempfile
-import math
 
 st.set_page_config(page_title="Mail Merge 式證書生成器", layout="wide")
 
@@ -90,7 +89,7 @@ with main_left:
                 "align": "中",  # 預設置中對齊
                 "bold": False,
                 "italic": False,
-                "anchor": "center"  # 新增錨點設定
+                "anchor": "center"  # 使用英文，避免中文key問題
             }
 
     # 欄位設定
@@ -124,20 +123,33 @@ with main_left:
                 # 對齊方式與錨點
                 align_col1, align_col2 = st.columns(2)
                 with align_col1:
+                    align_options = ["左", "中", "右"]
+                    current_align_index = 0
+                    if st.session_state.settings[col]["align"] in align_options:
+                        current_align_index = align_options.index(st.session_state.settings[col]["align"])
                     st.session_state.settings[col]["align"] = st.radio(
-                        "文字對齊", ["左", "中", "右"], 
-                        index=["左", "中", "右"].index(st.session_state.settings[col]["align"]),
+                        "文字對齊", align_options, 
+                        index=current_align_index,
                         key=f"align_{i}_{col}",
                         horizontal=True
                     )
                 with align_col2:
-                    st.session_state.settings[col]["anchor"] = st.radio(
-                        "錨點", ["左上", "中心", "右下"], 
-                        index=["左上", "中心", "右下"].index(st.session_state.settings[col]["anchor"]),
+                    anchor_options = ["left_top", "center", "right_bottom"]
+                    anchor_labels = ["左上", "中心", "右下"]
+                    current_anchor = st.session_state.settings[col]["anchor"]
+                    current_anchor_index = 0
+                    if current_anchor in anchor_options:
+                        current_anchor_index = anchor_options.index(current_anchor)
+                    
+                    selected_anchor_index = st.radio(
+                        "錨點", anchor_labels, 
+                        index=current_anchor_index,
                         key=f"anchor_{i}_{col}",
                         horizontal=True
                     )
-                
+                    # 轉換回英文key
+                    st.session_state.settings[col]["anchor"] = anchor_options[current_anchor_index]
+
                 # 字體設定
                 font1, font2 = st.columns(2)
                 with font1:
@@ -174,7 +186,7 @@ with main_left:
                     "中": "置中對齊：文字以指定 X 座標為中心",
                     "右": "右對齊：文字在指定 X 座標結束"
                 }
-                st.caption(f"說明：{align_desc[st.session_state.settings[col]['align']]}")
+                st.caption(f"說明：{align_desc.get(st.session_state.settings[col]['align'], '未設定')}")
 
     # 配置管理
     st.subheader("💾 配置管理")
@@ -192,7 +204,12 @@ with main_left:
         if uploaded_config:
             try:
                 loaded_config = json.load(uploaded_config)
-                st.session_state.settings.update(loaded_config["settings"])
+                # 更新設定，保持向後兼容
+                for col_key, settings_val in loaded_config["settings"].items():
+                    if col_key not in st.session_state.settings:
+                        st.session_state.settings[col_key] = settings_val
+                    else:
+                        st.session_state.settings[col_key].update(settings_val)
                 st.success("配置載入成功！")
             except Exception as e:
                 st.error(f"配置載入失敗：{str(e)}")
@@ -281,11 +298,11 @@ with main_right:
                 elif settings["align"] == "右":
                     final_x = settings["x"] - text_width
                 
-                # 根據錨點調整 Y 座標（可選）
+                # 根據錨點調整 Y 座標
                 final_y = settings["y"]
-                if settings["anchor"] == "中心":
+                if settings["anchor"] == "center":
                     final_y = settings["y"] - text_height // 2
-                elif settings["anchor"] == "右下":
+                elif settings["anchor"] == "right_bottom":
                     final_y = settings["y"] - text_height
                 
                 # 繪製粗體效果
@@ -350,9 +367,9 @@ with main_right:
                     actual_x = settings["x"] - text_width
                 
                 actual_y = settings["y"]
-                if settings["anchor"] == "中心":
+                if settings["anchor"] == "center":
                     actual_y = settings["y"] - text_height // 2
-                elif settings["anchor"] == "右下":
+                elif settings["anchor"] == "right_bottom":
                     actual_y = settings["y"] - text_height
                 
                 st.write(f"{col}: ({actual_x:.0f}, {actual_y:.0f})")
@@ -399,9 +416,9 @@ if hasattr(st.session_state, 'generate_clicked') and st.session_state.generate_c
                         final_x = settings["x"] - text_width
                     
                     final_y = settings["y"]
-                    if settings["anchor"] == "中心":
+                    if settings["anchor"] == "center":
                         final_y = settings["y"] - text_height // 2
-                    elif settings["anchor"] == "右下":
+                    elif settings["anchor"] == "right_bottom":
                         final_y = settings["y"] - text_height
                     
                     # 繪製粗體效果
