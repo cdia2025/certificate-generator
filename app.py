@@ -11,7 +11,7 @@ import requests
 # ==========================================
 # 1. 頁面設定與系統初始化
 # ==========================================
-st.set_page_config(page_title="專業證書生成器 V5.9.3", layout="wide")
+st.set_page_config(page_title="專業證書生成器 V5.9.4", layout="wide")
 
 # --- 重置專案功能 ---
 def reset_project():
@@ -100,7 +100,7 @@ def draw_styled_text(draw, text, pos, font, color, align="居中", bold=False, i
 # ==========================================
 # 3. 檔案上傳區
 # ==========================================
-st.title("✉️ 專業證書生成器 V5.9.3")
+st.title("✉️ 專業證書生成器 V5.9.4")
 
 up1, up2 = st.columns(2)
 with up1: bg_file = st.file_uploader("🖼️ 1. 上傳背景圖片", type=["jpg", "png", "jpeg"], key="main_bg")
@@ -152,7 +152,7 @@ with st.sidebar:
 
     st.divider()
 
-    # --- 單獨圖層調整 (現在位於上方) ---
+    # --- 單獨圖層調整 ---
     st.subheader("📝 圖層屬性設定")
     for col in display_cols:
         tag = " (🔗)" if col in st.session_state.linked_layers else ""
@@ -184,7 +184,7 @@ with st.sidebar:
 
     st.divider()
 
-    # --- Photoshop 批量工具 (現在移至下方，且預設閉合) ---
+    # --- Photoshop 批量工具 (閉合模式) ---
     with st.expander("🔗 批量連結與位移工具", expanded=False):
         st.info(f"📍 中心點參考：X={mid_x:.1f}, Y={mid_y:.1f}")
         st.session_state.linked_layers = st.multiselect("選取要同時移動的對象", display_cols)
@@ -210,10 +210,21 @@ with st.sidebar:
 # ==========================================
 st.divider()
 p1, p2 = st.columns([1, 1])
-with p1: id_col = st.selectbox("命名依據欄位", df.columns, key="id_sel")
+with p1: 
+    id_col = st.selectbox("命名依據欄位", df.columns, key="id_sel")
+
+# --- 全選功能邏輯 ---
+all_n = df[id_col].astype(str).tolist()
+
+def toggle_all_preview():
+    if st.session_state.pre_all_chk:
+        st.session_state.pre_sel = all_n
+    else:
+        st.session_state.pre_sel = all_n[:1]
+
 with p2:
-    all_n = df[id_col].astype(str).tolist()
-    sel_n = st.multiselect("預覽名單", all_n, default=all_n[:1], key="pre_sel")
+    st.checkbox("全選所有預覽名單", value=False, key="pre_all_chk", on_change=toggle_all_preview)
+    sel_n = st.multiselect("預覽名單", all_n, key="pre_sel", default=all_n[:1])
     target_df = df[df[id_col].astype(str).isin(sel_n)]
 
 st.subheader("👁️ 即時畫布預覽")
@@ -224,7 +235,6 @@ if not target_df.empty:
     canvas = bg_img.copy()
     draw = ImageDraw.Draw(canvas)
     for col in display_cols:
-        # 抓取連動的最新座標
         cur_x = st.session_state[f"num_x_{col}"]
         cur_y = st.session_state[f"num_y_{col}"]
         sv = st.session_state.settings[col]
