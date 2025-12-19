@@ -11,7 +11,14 @@ import requests
 # ==========================================
 # 1. 頁面設定與系統初始化
 # ==========================================
-st.set_page_config(page_title="專業證書生成器 V5.8 座標連動版", layout="wide")
+st.set_page_config(page_title="專業證書生成器 V5.9 完整版", layout="wide")
+
+# --- 新增功能：重置專案 ---
+def reset_project():
+    # 清空所有 Session State 儲存的資料與元件狀態
+    for key in list(st.session_state.keys()):
+        del st.session_state[key]
+    st.rerun()
 
 # 初始化 Session State
 if "settings" not in st.session_state:
@@ -21,22 +28,12 @@ if "linked_layers" not in st.session_state:
 
 # --- 同步函數：確保 Slider 和 Number Input 數值一致 ---
 def sync_coord(col, axis, trigger):
-    """
-    col: 欄位名稱
-    axis: 'x' 或 'y'
-    trigger: 'num' (數值框改變) 或 'sl' (滑桿改變)
-    """
     num_key = f"num_{axis}_{col}"
     sl_key = f"sl_{axis}_{col}"
-    
     if trigger == 'num':
-        # 數值框改了 -> 更新滑桿
         st.session_state[sl_key] = st.session_state[num_key]
     else:
-        # 滑桿改了 -> 更新數值框
         st.session_state[num_key] = st.session_state[sl_key]
-    
-    # 同步到主設定字典
     st.session_state.settings[col][axis] = st.session_state[num_key]
 
 # ==========================================
@@ -57,7 +54,7 @@ def get_font_resource():
     if not os.path.exists(target_path):
         url = "https://github.com/googlefonts/noto-cjk/raw/main/Sans/OTF/TraditionalChinese/NotoSansCJKtc-Regular.otf"
         try:
-            with st.spinner("正在下載中文字體..."):
+            with st.spinner("正在初始化中文字體..."):
                 r = requests.get(url, timeout=20)
                 with open(target_path, "wb") as f: f.write(r.content)
             return target_path
@@ -104,14 +101,14 @@ def draw_styled_text(draw, text, pos, font, color, align="居中", bold=False, i
 # ==========================================
 # 3. 檔案上傳
 # ==========================================
-st.title("✉️ 專業證書生成器 V5.8")
+st.title("✉️ 專業證書生成器 V5.9")
 
 up1, up2 = st.columns(2)
 with up1: bg_file = st.file_uploader("🖼️ 1. 上傳背景圖片", type=["jpg", "png", "jpeg"], key="main_bg")
 with up2: data_file = st.file_uploader("📊 2. 上傳資料檔", type=["xlsx", "csv"], key="main_data")
 
 if not bg_file or not data_file:
-    st.info("💡 提示：上傳後使用側邊欄調整。側邊欄寬度可手動拖動。")
+    st.info("👋 歡迎使用！請上傳背景圖片與資料檔開始設計。")
     st.stop()
 
 bg_img = Image.open(bg_file).convert("RGBA")
@@ -123,6 +120,10 @@ df = pd.read_excel(data_file) if data_file.name.endswith('xlsx') else pd.read_cs
 # 4. 側邊欄：控制面板
 # ==========================================
 with st.sidebar:
+    # --- 新專案按鈕 ---
+    if st.button("🆕 新專案 / 重新開始", use_container_width=True, type="secondary"):
+        reset_project()
+    
     st.header("⚙️ 屬性面板")
     
     with st.expander("💾 配置管理"):
@@ -132,22 +133,19 @@ with st.sidebar:
         uploaded_config = st.file_uploader("📥 載入舊設定", type=["json"])
         if uploaded_config:
             st.session_state.settings.update(json.load(uploaded_config))
-            # 載入後強制初始化 session_state 中的元件 key
             for k, v in st.session_state.settings.items():
                 st.session_state[f"num_x_{k}"] = float(v["x"])
                 st.session_state[f"sl_x_{k}"] = float(v["x"])
                 st.session_state[f"num_y_{k}"] = float(v["y"])
                 st.session_state[f"sl_y_{k}"] = float(v["y"])
-            st.success("配置已同步")
+            st.success("配置已載入")
 
     display_cols = st.multiselect("顯示欄位", df.columns, default=[df.columns[0]])
     
-    # 確保設定字典與 session_state 元件 key 初始化
+    # 補全參數與元件初始化
     for col in display_cols:
         if col not in st.session_state.settings:
             st.session_state.settings[col] = {"x": mid_x, "y": mid_y, "size": 60, "color": "#000000", "align": "居中", "bold": False, "italic": False}
-        
-        # 初始化 key
         if f"num_x_{col}" not in st.session_state: st.session_state[f"num_x_{col}"] = float(st.session_state.settings[col]["x"])
         if f"sl_x_{col}" not in st.session_state: st.session_state[f"sl_x_{col}"] = float(st.session_state.settings[col]["x"])
         if f"num_y_{col}" not in st.session_state: st.session_state[f"num_y_{col}"] = float(st.session_state.settings[col]["y"])
@@ -157,20 +155,18 @@ with st.sidebar:
 
     # --- Photoshop 批量工具 ---
     with st.expander("🔗 批量連結與位移", expanded=True):
-        st.caption(f"📍 中心點參考：X={mid_x:.0f}, Y={mid_y:.0f}")
+        st.caption(f"📍 中心點提示：X={mid_x:.0f}, Y={mid_y:.0f}")
         st.session_state.linked_layers = st.multiselect("連結對象", display_cols)
         lc1, lc2 = st.columns(2)
-        with lc1: b_x = st.number_input("批量 X 位移", value=0.0)
-        with lc2: b_y = st.number_input("批量 Y 位移", value=0.0)
-        b_s = st.number_input("批量縮放大小", value=0)
+        with lc1: b_x = st.number_input("批量 X 位移", value=0.0, key="batch_input_x")
+        with lc2: b_y = st.number_input("批量 Y 位移", value=0.0, key="batch_input_y")
+        b_s = st.number_input("批量縮放大小", value=0, key="batch_input_s")
         
         if st.button("✅ 執行批量套用", use_container_width=True):
             for c in st.session_state.linked_layers:
                 nx = max(0.0, min(W, float(st.session_state.settings[c]["x"] + b_x)))
                 ny = max(0.0, min(H, float(st.session_state.settings[c]["y"] + b_y)))
                 ns = max(10, min(1000, int(st.session_state.settings[c]["size"] + b_s)))
-                
-                # 同步所有相關狀態
                 st.session_state.settings[c].update({"x": nx, "y": ny, "size": ns})
                 st.session_state[f"num_x_{c}"] = nx
                 st.session_state[f"sl_x_{c}"] = nx
@@ -180,39 +176,30 @@ with st.sidebar:
 
     st.divider()
 
-    # --- 單獨圖層調整 (座標完美連動) ---
-    st.subheader("📝 圖層詳細調整")
+    # --- 單獨圖層調整 ---
+    st.subheader("📝 圖層詳細屬性")
     for col in display_cols:
         tag = " (🔗)" if col in st.session_state.linked_layers else ""
         with st.expander(f"圖層：{col}{tag}"):
             s = st.session_state.settings[col]
-            st.caption(f"中線提示: X={mid_x:.0f} | Y={mid_y:.0f}")
-            
-            # X 軸連動控制
+            # X 控制
             st.write("**X 座標控制**")
             cx1, cx2 = st.columns([1, 2])
-            with cx1:
-                st.number_input("數值", 0.0, W, key=f"num_x_{col}", on_change=sync_coord, args=(col, 'x', 'num'), label_visibility="collapsed")
-            with cx2:
-                st.slider("滑桿", 0.0, W, key=f"sl_x_{col}", on_change=sync_coord, args=(col, 'x', 'sl'), label_visibility="collapsed")
-            
-            # Y 軸連動控制
+            with cx1: st.number_input("數值", 0.0, W, key=f"num_x_{col}", on_change=sync_coord, args=(col, 'x', 'num'), label_visibility="collapsed")
+            with cx2: st.slider("滑桿", 0.0, W, key=f"sl_x_{col}", on_change=sync_coord, args=(col, 'x', 'sl'), label_visibility="collapsed")
+            # Y 控制
             st.write("**Y 座標控制**")
             cy1, cy2 = st.columns([1, 2])
-            with cy1:
-                st.number_input("數值", 0.0, H, key=f"num_y_{col}", on_change=sync_coord, args=(col, 'y', 'num'), label_visibility="collapsed")
-            with cy2:
-                st.slider("滑桿", 0.0, H, key=f"sl_y_{col}", on_change=sync_coord, args=(col, 'y', 'sl'), label_visibility="collapsed")
+            with cy1: st.number_input("數值", 0.0, H, key=f"num_y_{col}", on_change=sync_coord, args=(col, 'y', 'num'), label_visibility="collapsed")
+            with cy2: st.slider("滑桿", 0.0, H, key=f"sl_y_{col}", on_change=sync_coord, args=(col, 'y', 'sl'), label_visibility="collapsed")
             
             st.divider()
             f1, f2 = st.columns([1, 1])
             with f1: s["size"] = st.number_input("大小", 10, 1000, int(s["size"]), key=f"sz_{col}")
             with f2: s["color"] = st.color_picker("顏色", s["color"], key=f"cp_{col}")
-            
             sc1, sc2 = st.columns(2)
             with sc1: s["bold"] = st.checkbox("粗體", s["bold"], key=f"bd_{col}")
             with sc2: s["italic"] = st.checkbox("斜體", s["italic"], key=f"it_{col}")
-            
             opts = ["左對齊", "居中", "右對齊"]
             s["align"] = st.selectbox(f"對齊", opts, index=opts.index(s["align"]), key=f"al_{col}")
 
@@ -221,54 +208,49 @@ with st.sidebar:
 # ==========================================
 st.divider()
 p1, p2 = st.columns([1, 1])
-with p1: id_col = st.selectbox("識別欄位 (檔名)", df.columns)
+with p1: id_col = st.selectbox("識別欄位 (檔名)", df.columns, key="id_selector")
 with p2:
     all_n = df[id_col].astype(str).tolist()
-    sel_n = st.multiselect("預覽名單", all_n, default=all_n[:1])
+    sel_n = st.multiselect("預覽名單", all_n, default=all_n[:1], key="preview_selector")
     target_df = df[df[id_col].astype(str).isin(sel_n)]
 
 st.subheader("👁️ 畫布即時預覽")
-zoom = st.slider("🔍 畫布縮放 (%)", 50, 250, 100, step=10, key="zoom_sl")
+zoom = st.slider("🔍 畫布縮放 (%)", 50, 250, 100, step=10, key="zoom_slider")
 
 if not target_df.empty:
     row = target_df.iloc[0]
     canvas = bg_img.copy()
     draw = ImageDraw.Draw(canvas)
-    
     for col in display_cols:
-        sv = st.session_state.settings[col]
-        # 注意：座標從 session_state 的元件值獲取，確保最新
+        # 抓取連動的最新座標
         cur_x = st.session_state[f"num_x_{col}"]
         cur_y = st.session_state[f"num_y_{col}"]
-        
+        sv = st.session_state.settings[col]
         f_obj = get_font_object(sv["size"])
         res = draw_styled_text(draw, str(row[col]), (cur_x, cur_y), f_obj, sv["color"], sv["align"], sv["bold"], sv["italic"])
         if res: canvas.alpha_composite(res[0], dest=res[1])
-        
         g_c = "#FF0000BB" if col in st.session_state.linked_layers else "#0000FF44"
         draw.line([(0, cur_y), (W, cur_y)], fill=g_c, width=2)
         draw.line([(cur_x, 0), (cur_x, H)], fill=g_c, width=2)
-
     st.image(canvas, width=int(W * (zoom / 100)))
 
 # ==========================================
-# 6. 生成
+# 6. 生成功能
 # ==========================================
 st.divider()
-if st.button("🚀 開始批量製作選定證書", type="primary", use_container_width=True):
+if st.button("🚀 開始大量製作所有選定證書", type="primary", use_container_width=True, key="gen_btn"):
     if target_df.empty:
-        st.warning("請選取對象")
+        st.warning("請先選取對象名單")
     else:
         zip_buf = io.BytesIO()
-        with zipfile.ZipFile(zip_buffer := zip_buf, "w") as zf:
+        with zipfile.ZipFile(zip_buf, "w") as zf:
             prog = st.progress(0)
             for idx, (i, row) in enumerate(target_df.iterrows()):
                 out = bg_img.copy()
                 d_f = ImageDraw.Draw(out)
                 for col in display_cols:
                     sv = st.session_state.settings[col]
-                    cx = st.session_state[f"num_x_{col}"]
-                    cy = st.session_state[f"num_y_{col}"]
+                    cx, cy = st.session_state[f"num_x_{col}"], st.session_state[f"num_y_{col}"]
                     res = draw_styled_text(d_f, str(row[col]), (cx, cy), get_font_object(sv["size"]), sv["color"], sv["align"], sv["bold"], sv["italic"])
                     if res: out.alpha_composite(res[0], dest=res[1])
                 fb = io.BytesIO()
