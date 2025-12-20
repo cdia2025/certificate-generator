@@ -198,4 +198,101 @@ with col_btn3:
 st.session_state.master_selection = st.multiselect(
     f"✅ 已選取的製作清單 (目前共有 {len(st.session_state.master_selection)} 筆)",
     options=df[id_col].astype(str).tolist(),
-    default=st.session_state.master_sele
+    default=st.session_state.master_selection
+)
+
+target_df = df[df[id_col].astype(str).isin(st.session_state.master_selection)]
+
+# 即時預覽
+if not target_df.empty:
+    st.subheader("👁️ 畫布即時預覽")
+    zoom = st.slider("🔍 預覽縮放 (%)", 50, 250, 100, step=10, key="zoom_sl")
+    row = target_df.iloc[0]
+    canvas = bg_img.copy()
+    draw = ImageDraw.Draw(canvas)
+    for col in display_cols:
+        cx, cy, sv = st.session_state[f"num_x_{col}"], st.session_state[f"num_y_{col}"], st.session_state.settings[col]
+        res = draw_styled_text(draw, str(row[col]), (cx, cy), get_font_obj(sv["size"]), sv["color"], sv["align"], sv["bold"], sv["italic"])
+        if res: canvas.alpha_composite(res[0], dest=res[1])
+        gc = "#FF0000BB" if col in st.session_state.linked_layers else "#0000FF44"
+        draw.line([(0, cy), (W, cy)], fill=gc, width=2); draw.line([(cx, 0), (cx, H)], fill=gc, width=2)
+    st.image(canvas, width=int(W * (zoom / 100)))
+
+# ==========================================
+# 6. 生成與進階排版
+# ==========================================
+st.divider()
+st.header("🚀 批量輸出設定")
+out_c1, out_c2, out_c3 = st.columns(3)
+
+with out_c1:
+    out_mode = st.radio("輸出內容", ["完整 (背景+文字)", "透明 (僅限文字)"])
+    out_layout = st.radio("佈局方式", ["單張圖片 (ZIP)", "A4 自動拼板 (Print Ready)"])
+
+with out_c2:
+    target_width_cm = st.number_input("物件輸出寬度 (CM)", 1.0, 50.0, 10.0)
+    a4_margin_cm = st.number_input("A4 頁邊界 (CM)", 0.0, 5.0, 1.0)
+
+with out_c3:
+    item_w_px = int(target_width_cm * PX_PER_CM)
+    item_h_px = int(item_w_px * (H / W))
+    st.info(f"解析度: 300 DPI\n單一物件尺寸: {item_w_px}x{item_h_px} 像素")
+
+if st.button("🔥 開始執行生成任務", type="primary", use_container_width=True):
+    if target_df.empty:
+        st.warning("請先選取名單！")
+    else:
+        results = []
+        prog = st.progress(0); status = st.empty()
+        
+        for idx, (i, row) in enumerate(target_df.iterrows()):
+            status.text(f"處理中: {idx+1}/{len(target_df)}")
+            canvas = bg_img.copy() if out_mode == "完整 (背景+文字)" else Image.new("RGBA", (int(W), int(H)), (0,0,0,0))
+            draw = ImageDraw.Draw(canvas)
+            for col in display_cols:
+                sv = st.session_state.settings[col]
+                res = draw_styled_text(draw, str(row[col]), (sv["x"], sv["y"]), get_font_obj(sv["size"]), sv["color"], sv["align"], sv["bold"], sv["italic"])
+                if res: canvas.alpha_composite(res[0], dest=res[1])
+            
+            # 依 CM 設定進行高品質縮放
+            resized = canvas.resize((item_w_px, item_h_px), Image.LANCZOS)
+            results.append((str(row[id_col]), resized))
+            prog.progress((idx + 1) / len(target_df))
+
+        zip_buf = io.BytesIO()
+        with zipfile.ZipFile(zip_buf, "w") as zf:
+            if out_layout == "單張圖片 (ZIP)":
+                for name, img in results:
+                    buf = io.BytesIO()
+                    img.save(buf, format="PNG")
+                    zf.writestr(f"{name}.png", buf.getvalue())
+            else:
+                # A4 拼板邏輯 (修正透明背景問題)
+                margin_px = int(a4_margin_cm * PX_PER_CM)
+                gap_px = 10 
+                curr_page = Image.new("RGBA", (A4_W_PX, A4_H_PX), (255, 255, 255, 255))
+                cx, cy, max_rh, page_idx = margin_px, margin_px, 0, 1
+                
+                for idx, (name, img) in enumerate(results):
+                    if cx + item_w_px > A4_W_PX - margin_px:
+                        cx = margin_px
+                        cy += max_rh + gap_px
+                        max_rh = 0
+                    if cy + item_h_px > A4_H_PX - margin_px:
+                        final_page = curr_page.convert("RGB")
+                        buf = io.BytesIO(); final_page.save(buf, format="JPEG", quality=95)
+                        zf.writestr(f"A4_Layout_Page_{page_idx}.jpg", buf.getvalue())
+                        curr_page = Image.new("RGBA", (A4_W_PX, A4_H_PX), (255, 255, 255, 255))
+                        cx, cy, max_rh, page_idx = margin_px, margin_px, 0, page_idx + 1
+                    
+                    # 關鍵：帶透明度貼合
+                    curr_page.paste(img, (cx, cy), img)
+                    max_rh = max(max_rh, item_h_px)
+                    cx += item_w_px + gap_px
+                
+                final_page = curr_page.convert("RGB")
+                buf = io.BytesIO(); final_page.save(buf, format="JPEG", quality=95)
+                zf.writestr(f"A4_Layout_Page_{page_idx}.jpg", buf.getvalue())
+
+        status.text("✅ 生成任務已完成！")
+        st.download_button("📥 下載生成的壓縮包 (ZIP)", zip_buf.getvalue(), "output_v6_2.zip", "application/zip", use_container_width=True)
