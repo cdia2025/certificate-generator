@@ -12,7 +12,7 @@ import math
 # ==========================================
 # 1. 系統初始化與頁面設定
 # ==========================================
-st.set_page_config(page_title="專業證書生成器 V7.1 批量修復版", layout="wide")
+st.set_page_config(page_title="專業證書生成器 V7.2 穩定選取版", layout="wide")
 
 DPI = 300
 PX_PER_CM = DPI / 2.54 
@@ -74,16 +74,16 @@ def draw_styled_text(draw, text, pos, font, color, align="居中", bold=False, i
         return None
 
 # ==========================================
-# 3. 檔案上傳
+# 3. 檔案上傳與數據預處理
 # ==========================================
-st.title("✉️ 專業證書生成器 V7.1")
+st.title("✉️ 專業證書生成器 V7.2")
 
 up1, up2 = st.columns(2)
 with up1: bg_file = st.file_uploader("🖼️ 1. 上傳背景圖片", type=["jpg", "png", "jpeg"], key="main_bg")
 with up2: data_file = st.file_uploader("📊 2. 上傳資料檔", type=["xlsx", "csv"], key="main_data")
 
 if not bg_file or not data_file:
-    st.info("👋 請上傳檔案。V7.1 完美修復批量工具同步問題。")
+    st.info("👋 上傳背景圖與資料檔後，即可在下方選取名單並在側邊欄進行排版。")
     st.stop()
 
 bg_img = Image.open(bg_file).convert("RGBA")
@@ -108,7 +108,7 @@ with st.sidebar:
 
     display_cols = st.multiselect("顯示欄位", df.columns, default=[df.columns[0]])
     
-    # 參數補全與初始化
+    # 參數補全
     for col in display_cols:
         if col not in st.session_state.settings:
             st.session_state.settings[col] = {"x": mid_x, "y": mid_y, "size": 60, "color": "#000000", "align": "居中", "bold": False, "italic": False}
@@ -118,87 +118,88 @@ with st.sidebar:
                 if k not in st.session_state.settings[col]: st.session_state.settings[col][k] = v
 
     st.divider()
-    # 📝 個別圖層設定區
     st.subheader("📝 個別圖層設定")
     for col in display_cols:
         link_tag = " (🔗)" if col in st.session_state.linked_layers else ""
         with st.expander(f"圖層：{col}{link_tag}"):
             s = st.session_state.settings[col]
             st.caption(f"📍 中心參考：X={mid_x:.0f}, Y={mid_y:.0f}")
-            
-            # 使用 value 連動 dictionary
             s["x"] = st.number_input(f"X座標", 0.0, W, float(s["x"]), key=f"nx_{col}")
             s["x"] = st.slider(f"X滑桿", 0.0, W, float(s["x"]), key=f"sx_{col}", label_visibility="collapsed")
-            
             s["y"] = st.number_input(f"Y座標", 0.0, H, float(s["y"]), key=f"ny_{col}")
             s["y"] = st.slider(f"Y滑桿", 0.0, H, float(s["y"]), key=f"sy_{col}", label_visibility="collapsed")
-            
             f1, f2 = st.columns(2)
             with f1: s["size"] = st.number_input("字體大小", 10, 3000, int(s["size"]), key=f"size_{col}")
-            with f2: s["color"] = st.color_picker("文字顏色", s["color"], key=f"color_{col}")
-            
+            with f2: s["color"] = st.color_picker("顏色", s["color"], key=f"color_{col}")
             sc1, sc2 = st.columns(2)
             with sc1: s["bold"] = st.checkbox("加粗", s["bold"], key=f"bold_{col}")
             with sc2: s["italic"] = st.checkbox("傾斜", s["italic"], key=f"italic_{col}")
             s["align"] = st.selectbox("對齊", ["左對齊", "居中", "右對齊"], index=["左對齊", "居中", "右對齊"].index(s["align"]), key=f"align_{col}")
 
     st.divider()
-    # 🔗 批量位移工具 (修復反應問題：核心邏輯變更)
     with st.expander("🔗 批量連結與位移工具", expanded=False):
         st.info(f"📍 畫布中心參考：X={mid_x:.1f}, Y={mid_y:.1f}")
-        st.session_state.linked_layers = st.multiselect("選取要同步的圖層", display_cols)
-        
-        st.write("**批量相對偏移**")
+        st.session_state.linked_layers = st.multiselect("選取要同步的對象", display_cols)
         bx = st.slider("左右位移", -W, W, 0.0, key="batch_sl_x")
         by = st.slider("上下位移", -H, H, 0.0, key="batch_sl_y")
         bs = st.slider("字體增減", -500, 500, 0, key="batch_sl_s")
-        
         if st.button("🚀 執行批量變更", use_container_width=True):
-            if not st.session_state.linked_layers:
-                st.warning("請先選取圖層")
-            else:
+            if st.session_state.linked_layers:
                 for c in st.session_state.linked_layers:
-                    # 1. 更新設定
                     st.session_state.settings[c]["x"] = max(0.0, min(W, st.session_state.settings[c]["x"] + bx))
                     st.session_state.settings[c]["y"] = max(0.0, min(H, st.session_state.settings[c]["y"] + by))
                     st.session_state.settings[c]["size"] = max(10, st.session_state.settings[c]["size"] + bs)
-                    
-                    # 2. 【關鍵修復】刪除元件 Key 的快取，強制 UI 重新讀取 value
-                    widget_keys = [f"nx_{c}", f"sx_{c}", f"ny_{c}", f"sy_{c}", f"size_{c}"]
-                    for wk in widget_keys:
-                        if wk in st.session_state:
-                            del st.session_state[wk]
-                
-                st.success("批量修改完成")
+                    for wk in [f"nx_{c}", f"sx_{c}", f"ny_{c}", f"sy_{c}", f"size_{c}"]:
+                        if wk in st.session_state: del st.session_state[wk]
                 st.rerun()
 
 # ==========================================
-# 5. 主頁面：名單選取 (表格模式)
+# 5. 主頁面：製作名單選取 (解決連續選取問題)
 # ==========================================
 st.divider()
 st.header("👥 製作名單選取")
-id_col = st.selectbox("選擇主識別欄位 (檔名)", df.columns, key="id_sel")
+id_col = st.selectbox("選擇主識別欄位 (檔名基準)", df.columns, key="id_sel")
 
-if "selection_df" not in st.session_state:
-    st.session_state.selection_df = pd.DataFrame({"選取": False, id_col: df[id_col].astype(str)})
+# 穩定初始化選取狀態表
+if "selection_df" not in st.session_state or st.session_state.get('last_id_col') != id_col:
+    # 使用 id_col 作為 Index，確保搜尋過濾後 update 不出錯
+    st.session_state.selection_df = pd.DataFrame(
+        {"選取": False}, 
+        index=df[id_col].astype(str).unique()
+    )
+    st.session_state.last_id_col = id_col
 
+# 快速按鈕
 c_btn1, c_btn2, _ = st.columns([1, 1, 4])
 with c_btn1:
-    if st.button("🔳 全選名單", use_container_width=True): st.session_state.selection_df["選取"] = True
+    if st.button("🔳 全選名單", use_container_width=True):
+        st.session_state.selection_df["選取"] = True
 with c_btn2:
-    if st.button("🗑️ 清空選取", use_container_width=True): st.session_state.selection_df["選取"] = False
+    if st.button("🗑️ 清空選取", use_container_width=True):
+        st.session_state.selection_df["選取"] = False
 
-search_q = st.text_input("🔍 搜尋名單過濾...", "")
-filtered_selection_df = st.session_state.selection_df[st.session_state.selection_df[id_col].str.contains(search_q, case=False)]
+# 搜尋過濾
+search_q = st.text_input("🔍 搜尋並過濾名單...", placeholder="輸入關鍵字...")
+view_df = st.session_state.selection_df.copy()
 
-edited_df = st.data_editor(
-    filtered_selection_df,
-    column_config={"選取": st.column_config.CheckboxColumn(required=True)},
-    disabled=[id_col], hide_index=True, use_container_width=True, key="list_editor"
+if search_q:
+    view_df = view_df[view_df.index.str.contains(search_q, case=False)]
+
+# 表格編輯器 (重點：穩定索引對齊)
+edited_view = st.data_editor(
+    view_df,
+    column_config={"選取": st.column_config.CheckboxColumn("選取", default=False, required=True)},
+    use_container_width=True,
+    key="list_editor_v72"
 )
-st.session_state.selection_df.update(edited_df)
 
-final_selected_ids = st.session_state.selection_df[st.session_state.selection_df["選取"] == True][id_col].tolist()
+# 【核心修正】將編輯後的狀態同步回主 Session 表 (根據 Index 對位)
+if not edited_view.equals(view_df):
+    st.session_state.selection_df.update(edited_view)
+    st.rerun()
+
+# 獲取最終勾選的名單
+final_selected_ids = st.session_state.selection_df[st.session_state.selection_df["選取"] == True].index.tolist()
 target_df = df[df[id_col].astype(str).isin(final_selected_ids)]
 
 # 即時預覽
@@ -219,14 +220,14 @@ if not target_df.empty:
     st.image(canvas, width=int(W * (zoom / 100)))
 
 # ==========================================
-# 6. 生成與排版
+# 6. 生成與排版 (印刷優化)
 # ==========================================
 st.divider()
 st.header("🚀 批量輸出設定")
 out_c1, out_c2, out_c3 = st.columns(3)
 
 with out_c1:
-    out_mode = st.radio("輸出模式", ["完整 (背景+文字)", "透明 (僅限文字)"])
+    out_mode = st.radio("輸出內容", ["完整 (背景+文字)", "透明 (僅限文字)"])
     out_layout = st.radio("排版佈局", ["單張圖片 (ZIP)", "A4 自動拼板 (Print Ready)"])
 
 with out_c2:
@@ -235,18 +236,17 @@ with out_c2:
     w_num = st.number_input("打字輸入 (CM)", 1.0, 100.0, float(cur_w), step=0.1, key="w_num_input")
     w_sl = st.slider("滑桿拖動 (CM)", 1.0, 100.0, float(w_num), step=0.1, key="w_sl_input", label_visibility="collapsed")
     st.session_state.out_w_cm = w_sl
-    
     a4_margin_cm = st.number_input("A4 邊白 (CM)", 0.0, 5.0, 1.0, step=0.1)
     item_gap_mm = st.number_input("物件間距 (MM)", 0.0, 10.0, 0.5, step=0.1)
 
 with out_c3:
     item_w_px = int(st.session_state.out_w_cm * PX_PER_CM)
     item_h_px = int(item_w_px * (H / W))
-    st.info(f"解析度: 300 DPI\n拼板間距: {item_gap_mm}mm\n像素尺寸: {item_w_px}x{item_h_px}")
+    st.info(f"解析度: 300 DPI\n像素尺寸: {item_w_px}x{item_h_px}")
 
 if st.button("🔥 開始批量製作任務", type="primary", use_container_width=True):
     if not final_selected_ids:
-        st.warning("請勾選名單！")
+        st.warning("請先勾選名單！")
     else:
         results = []
         prog = st.progress(0); status = st.empty()
@@ -275,12 +275,12 @@ if st.button("🔥 開始批量製作任務", type="primary", use_container_widt
                 for idx, (name, img) in enumerate(results):
                     if cx + item_w_px > A4_W_PX - margin_px: cx, cy, max_rh = margin_px, cy + max_rh + gap_px, 0
                     if cy + item_h_px > A4_H_PX - margin_px:
-                        buf = io.BytesIO(); curr_page.convert("RGB").save(buf, format="JPEG", quality=95); zf.writestr(f"A4_Print_Page_{page_idx}.jpg", buf.getvalue())
+                        buf = io.BytesIO(); curr_page.convert("RGB").save(buf, format="JPEG", quality=95); zf.writestr(f"A4_Print_{page_idx}.jpg", buf.getvalue())
                         curr_page = Image.new("RGBA", (A4_W_PX, A4_H_PX), (255, 255, 255, 255))
                         cx, cy, max_rh, page_idx = margin_px, margin_px, 0, page_idx + 1
                     curr_page.paste(img, (cx, cy), img)
                     max_rh = max(max_rh, item_h_px); cx += item_w_px + gap_px
-                buf = io.BytesIO(); curr_page.convert("RGB").save(buf, format="JPEG", quality=95); zf.writestr(f"A4_Print_Page_{page_idx}.jpg", buf.getvalue())
+                buf = io.BytesIO(); curr_page.convert("RGB").save(buf, format="JPEG", quality=95); zf.writestr(f"A4_Print_{page_idx}.jpg", buf.getvalue())
 
         status.text("✅ 生成任務已完成！")
-        st.download_button("📥 下載生成的壓縮包 (ZIP)", zip_buf.getvalue(), "output_v7_1.zip", "application/zip", use_container_width=True)
+        st.download_button("📥 下載生成的壓縮包 (ZIP)", zip_buf.getvalue(), "output_v7_2.zip", "application/zip", use_container_width=True)
