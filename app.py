@@ -12,7 +12,7 @@ import math
 # ==========================================
 # 1. 系統初始化與頁面設定
 # ==========================================
-st.set_page_config(page_title="專業證書生成器 V6.5 數值同步版", layout="wide")
+st.set_page_config(page_title="專業證書生成器 V6.6 批量修復版", layout="wide")
 
 DPI = 300
 PX_PER_CM = DPI / 2.54 
@@ -22,11 +22,10 @@ A4_H_PX = int(29.7 * PX_PER_CM)
 # 初始化 Session State
 if "settings" not in st.session_state: st.session_state.settings = {}
 if "linked_layers" not in st.session_state: st.session_state.linked_layers = []
-if "master_selection" not in st.session_state: st.session_state.master_selection = set()
 
 # --- 輸出寬度同步邏輯 ---
 if "out_w_cm" not in st.session_state:
-    st.session_state.out_w_cm = 10.0 # 預設值
+    st.session_state.out_w_cm = 10.0 
 
 def sync_out_w(trigger):
     if trigger == "num":
@@ -94,14 +93,14 @@ def draw_styled_text(draw, text, pos, font, color, align="居中", bold=False, i
 # ==========================================
 # 3. 檔案上傳
 # ==========================================
-st.title("✉️ 專業證書生成器 V6.5")
+st.title("✉️ 專業證書生成器 V6.6")
 
 up1, up2 = st.columns(2)
 with up1: bg_file = st.file_uploader("🖼️ 1. 上傳背景圖", type=["jpg", "png", "jpeg"], key="main_bg")
 with up2: data_file = st.file_uploader("📊 2. 上傳資料檔", type=["xlsx", "csv"], key="main_data")
 
 if not bg_file or not data_file:
-    st.info("👋 歡迎！V6.5 已修復輸出寬度數值與滑桿不同步的問題。")
+    st.info("👋 歡迎！V6.6 已恢復批量位移工具，並保留寬度同步與表格勾選優化。")
     st.stop()
 
 bg_img = Image.open(bg_file).convert("RGBA")
@@ -137,8 +136,10 @@ with st.sidebar:
             if k not in st.session_state: st.session_state[k] = st.session_state[f"sl_{ax}_{col}"] = float(st.session_state.settings[col][ax])
 
     st.divider()
+    # 單獨調整
     for col in display_cols:
-        with st.expander(f"圖層：{col}"):
+        link_tag = " (🔗)" if col in st.session_state.get('linked_layers', []) else ""
+        with st.expander(f"圖層：{col}{link_tag}"):
             s = st.session_state.settings[col]
             c1, c2 = st.columns([1, 2])
             with c1: st.number_input("X", 0.0, W, key=f"num_x_{col}", on_change=sync_coord, args=(col, 'x', 'num'), label_visibility="collapsed")
@@ -153,6 +154,27 @@ with st.sidebar:
             with sc1: s["bold"] = st.checkbox("粗體", s["bold"], key=f"bd_{col}")
             with sc2: s["italic"] = st.checkbox("斜體", s["italic"], key=f"it_{col}")
             s["align"] = st.selectbox("對齊", ["左對齊", "居中", "右對齊"], index=["左對齊", "居中", "右對齊"].index(s["align"]), key=f"al_{col}")
+
+    st.divider()
+    # 批量位移工具 (修復回歸)
+    with st.expander("🔗 批量位移與連結工具", expanded=False):
+        st.session_state.linked_layers = st.multiselect("選取批量對象", display_cols, default=st.session_state.linked_layers)
+        lc1, lc2 = st.columns(2)
+        with lc1: b_x = st.number_input("批量 X 位移", value=0.0, key="batch_move_x")
+        with lc2: b_y = st.number_input("批量 Y 位移", value=0.0, key="batch_move_y")
+        b_s = st.number_input("批量大小縮放", value=0, key="batch_size_scale")
+        if st.button("✅ 執行批量套用", use_container_width=True):
+            for c in st.session_state.linked_layers:
+                nx = max(0.0, min(W, st.session_state.settings[c]["x"] + b_x))
+                ny = max(0.0, min(H, st.session_state.settings[c]["y"] + b_y))
+                ns = max(10, st.session_state.settings[c]["size"] + b_s)
+                # 更新數據
+                st.session_state.settings[c].update({"x": nx, "y": ny, "size": ns})
+                # 同步更新 UI 元件狀態
+                st.session_state[f"num_x_{c}"] = st.session_state[f"sl_x_{c}"] = nx
+                st.session_state[f"num_y_{c}"] = st.session_state[f"sl_y_{c}"] = ny
+            st.success("批量修改成功")
+            st.rerun()
 
 # ==========================================
 # 5. 主頁面：製作名單 (表格選取)
@@ -198,7 +220,7 @@ if not target_df.empty:
     st.image(canvas, width=int(W * (zoom / 100)))
 
 # ==========================================
-# 6. 生成與排版 (完美同步寬度控制)
+# 6. 生成與排版 (寬度雙向同步)
 # ==========================================
 st.divider()
 st.header("🚀 批量輸出設定")
@@ -212,7 +234,6 @@ with out_c2:
     st.write("**物件輸出寬度 (CM)**")
     w_col1, w_col2 = st.columns([1, 2])
     
-    # 初始化同步用的 Session State 鍵值
     if "out_w_num" not in st.session_state: st.session_state.out_w_num = st.session_state.out_w_cm
     if "out_w_sl" not in st.session_state: st.session_state.out_w_sl = st.session_state.out_w_cm
 
@@ -221,14 +242,13 @@ with out_c2:
     with w_col2:
         st.slider("CM 滑桿", 1.0, 50.0, step=0.1, key="out_w_sl", on_change=sync_out_w, args=("sl",), label_visibility="collapsed")
     
-    # 使用最終同步後的數值
     final_w_cm = st.session_state.out_w_cm
     a4_margin_cm = st.number_input("A4 頁邊界 (CM)", 0.0, 5.0, 1.0, step=0.1)
 
 with out_c3:
     item_w_px = int(final_w_cm * PX_PER_CM)
     item_h_px = int(item_w_px * (H / W))
-    st.info(f"解析度: 300 DPI\n最終輸出尺寸: {final_w_cm} CM\n單一物件像素: {item_w_px}x{item_h_px}")
+    st.info(f"解析度: 300 DPI\n目標尺寸: {final_w_cm} CM\n輸出像素: {item_w_px}x{item_h_px}")
 
 if st.button("🔥 開始執行生成任務", type="primary", use_container_width=True):
     if not final_selected_ids:
@@ -242,7 +262,8 @@ if st.button("🔥 開始執行生成任務", type="primary", use_container_widt
             draw = ImageDraw.Draw(canvas)
             for col in display_cols:
                 sv = st.session_state.settings[col]
-                res = draw_styled_text(draw, str(row[col]), (sv["x"], sv["y"]), get_font_obj(sv["size"]), sv["color"], sv["align"], sv["bold"], sv["italic"])
+                cx, cy = st.session_state[f"num_x_{col}"], st.session_state[f"num_y_{col}"]
+                res = draw_styled_text(draw, str(row[col]), (cx, cy), get_font_obj(sv["size"]), sv["color"], sv["align"], sv["bold"], sv["italic"])
                 if res: canvas.alpha_composite(res[0], dest=res[1])
             resized = canvas.resize((item_w_px, item_h_px), Image.LANCZOS)
             results.append((str(row[id_col]), resized))
@@ -269,4 +290,4 @@ if st.button("🔥 開始執行生成任務", type="primary", use_container_widt
                 buf = io.BytesIO(); curr_page.convert("RGB").save(buf, format="JPEG", quality=95); zf.writestr(f"A4_Page_{page_idx}.jpg", buf.getvalue())
 
         status.text("✅ 生成任務已完成！")
-        st.download_button("📥 下載產出的壓縮包 (ZIP)", zip_buf.getvalue(), "output_v6_5.zip", "application/zip", use_container_width=True)
+        st.download_button("📥 下載產出的壓縮包 (ZIP)", zip_buf.getvalue(), "output_v6_6.zip", "application/zip", use_container_width=True)
