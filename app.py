@@ -12,7 +12,7 @@ import math
 # ==========================================
 # 1. 系統初始化與頁面設定
 # ==========================================
-st.set_page_config(page_title="專業證書生成器 V6.3 快速全選版", layout="wide")
+st.set_page_config(page_title="專業證書生成器 V6.4 高效選取版", layout="wide")
 
 DPI = 300
 PX_PER_CM = DPI / 2.54 
@@ -22,7 +22,7 @@ A4_H_PX = int(29.7 * PX_PER_CM)
 # 初始化 Session State
 if "settings" not in st.session_state: st.session_state.settings = {}
 if "linked_layers" not in st.session_state: st.session_state.linked_layers = []
-if "master_selection" not in st.session_state: st.session_state.master_selection = []
+if "master_selection" not in st.session_state: st.session_state.master_selection = set()
 
 def reset_project():
     for key in list(st.session_state.keys()): del st.session_state[key]
@@ -35,7 +35,7 @@ def sync_coord(col, axis, trigger):
     st.session_state.settings[col][axis] = st.session_state[nk]
 
 # ==========================================
-# 2. 字體處理與繪製 (支援斜體模擬)
+# 2. 字體處理與繪製邏輯
 # ==========================================
 @st.cache_resource
 def get_font_resource():
@@ -82,14 +82,14 @@ def draw_styled_text(draw, text, pos, font, color, align="居中", bold=False, i
 # ==========================================
 # 3. 檔案上傳
 # ==========================================
-st.title("✉️ 專業證書生成器 V6.3")
+st.title("✉️ 專業證書生成器 V6.4")
 
 up1, up2 = st.columns(2)
 with up1: bg_file = st.file_uploader("🖼️ 1. 上傳背景圖", type=["jpg", "png", "jpeg"], key="main_bg")
 with up2: data_file = st.file_uploader("📊 2. 上傳資料檔", type=["xlsx", "csv"], key="main_data")
 
 if not bg_file or not data_file:
-    st.info("👋 歡迎！請上傳背景圖與資料檔。V6.3 加入了快速全選名單功能。")
+    st.info("👋 歡迎！請上傳檔案後開始設計。V6.4 支援表格化勾選名單與寬度打字輸入。")
     st.stop()
 
 bg_img = Image.open(bg_file).convert("RGBA")
@@ -129,11 +129,9 @@ with st.sidebar:
     for col in display_cols:
         with st.expander(f"圖層：{col}"):
             s = st.session_state.settings[col]
-            st.write(f"**X 座標** (中心參考: {mid_x:.0f})")
             c1, c2 = st.columns([1, 2])
             with c1: st.number_input("X", 0.0, W, key=f"num_x_{col}", on_change=sync_coord, args=(col, 'x', 'num'), label_visibility="collapsed")
             with c2: st.slider("X Slider", 0.0, W, key=f"sl_x_{col}", on_change=sync_coord, args=(col, 'x', 'sl'), label_visibility="collapsed")
-            st.write(f"**Y 座標** (中心參考: {mid_y:.0f})")
             c1, c2 = st.columns([1, 2])
             with c1: st.number_input("Y", 0.0, H, key=f"num_y_{col}", on_change=sync_coord, args=(col, 'y', 'num'), label_visibility="collapsed")
             with c2: st.slider("Y Slider", 0.0, H, key=f"sl_y_{col}", on_change=sync_coord, args=(col, 'y', 'sl'), label_visibility="collapsed")
@@ -162,35 +160,52 @@ with st.sidebar:
             st.rerun()
 
 # ==========================================
-# 5. 主頁面：名單管理與預覽
+# 5. 主頁面：名單管理與預覽 (表格化優化)
 # ==========================================
 st.divider()
 st.header("👥 製作名單選取")
 id_col = st.selectbox("選擇主識別欄位 (檔案命名基準)", df.columns, key="id_sel")
 
-all_ids = df[id_col].astype(str).tolist()
+# 建立選擇用資料表
+if "selection_df" not in st.session_state:
+    st.session_state.selection_df = pd.DataFrame({"選取": False, id_col: df[id_col].astype(str)})
 
-# 快速按鈕區
-col_btn1, col_btn2, _ = st.columns([1, 1, 4])
-with col_btn1:
-    if st.button("🔳 全選所有名單", use_container_width=True):
-        st.session_state.master_selection = all_ids
-with col_btn2:
+# 全選與清空邏輯
+c_btn1, c_btn2, _ = st.columns([1, 1, 4])
+with c_btn1:
+    if st.button("🔳 全選所有", use_container_width=True):
+        st.session_state.selection_df["選取"] = True
+with c_btn2:
     if st.button("🗑️ 清空選取", use_container_width=True):
-        st.session_state.master_selection = []
+        st.session_state.selection_df["選取"] = False
 
-# 名單選取框
-st.session_state.master_selection = st.multiselect(
-    f"已選取名單 (目前共有 {len(st.session_state.master_selection)} 筆)",
-    options=all_ids,
-    default=st.session_state.master_selection
+# 搜尋過濾功能
+search_q = st.text_input("🔍 搜尋名單 (輸入關鍵字過濾下方表格)", "")
+filtered_selection_df = st.session_state.selection_df[
+    st.session_state.selection_df[id_col].str.contains(search_q, case=False)
+]
+
+# 表格化選取區 (Data Editor)
+st.write("請在下方表格勾選要製作的人員：")
+edited_df = st.data_editor(
+    filtered_selection_df,
+    column_config={"選取": st.column_config.CheckboxColumn(required=True)},
+    disabled=[id_col],
+    hide_index=True,
+    use_container_width=True,
+    key="list_editor"
 )
 
-target_df = df[df[id_col].astype(str).isin(st.session_state.master_selection)]
+# 同步回 session_state 的主表
+st.session_state.selection_df.update(edited_df)
+
+# 取得最終選取的名單
+final_selected_ids = st.session_state.selection_df[st.session_state.selection_df["選取"] == True][id_col].tolist()
+target_df = df[df[id_col].astype(str).isin(final_selected_ids)]
 
 # 即時預覽
 if not target_df.empty:
-    st.subheader("👁️ 畫布即時預覽")
+    st.subheader(f"👁️ 畫布即時預覽 (已選取 {len(final_selected_ids)} 筆)")
     zoom = st.slider("🔍 預覽縮放 (%)", 50, 250, 100, step=10, key="zoom_sl")
     row = target_df.iloc[0]
     canvas = bg_img.copy()
@@ -204,7 +219,7 @@ if not target_df.empty:
     st.image(canvas, width=int(W * (zoom / 100)))
 
 # ==========================================
-# 6. 生成與進階排版
+# 6. 生成與進階排版 (支援打字輸入寬度)
 # ==========================================
 st.divider()
 st.header("🚀 批量輸出設定")
@@ -215,17 +230,25 @@ with out_c1:
     out_layout = st.radio("佈局方式", ["單張圖片 (ZIP)", "A4 自動拼板 (Print Ready)"])
 
 with out_c2:
-    target_width_cm = st.number_input("物件輸出寬度 (CM)", 1.0, 50.0, 10.0)
-    a4_margin_cm = st.number_input("A4 頁邊界 (CM)", 0.0, 5.0, 1.0)
+    st.write("**物件輸出寬度 (CM)**")
+    w_col1, w_col2 = st.columns([1, 2])
+    with w_col1:
+        # 數值輸入框，支援打字
+        target_width_cm = st.number_input("CM 數值", 1.0, 50.0, 10.0, step=0.1, label_visibility="collapsed")
+    with w_col2:
+        # 同步的滑桿，支援拖動
+        target_width_cm = st.slider("CM 滑桿", 1.0, 50.0, target_width_cm, step=0.1, label_visibility="collapsed")
+    
+    a4_margin_cm = st.number_input("A4 頁邊界 (CM)", 0.0, 5.0, 1.0, step=0.1)
 
 with out_c3:
     item_w_px = int(target_width_cm * PX_PER_CM)
     item_h_px = int(item_w_px * (H / W))
-    st.info(f"解析度: 300 DPI\n單一物件尺寸: {item_w_px}x{item_h_px} 像素")
+    st.info(f"解析度: 300 DPI\n單一物件像素: {item_w_px}x{item_h_px}")
 
 if st.button("🔥 開始執行生成任務", type="primary", use_container_width=True):
-    if not st.session_state.master_selection:
-        st.warning("請先選取製作名單！")
+    if not final_selected_ids:
+        st.warning("請先在表格中勾選名單！")
     else:
         results = []
         prog = st.progress(0); status = st.empty()
@@ -252,7 +275,6 @@ if st.button("🔥 開始執行生成任務", type="primary", use_container_widt
                     img.save(buf, format="PNG")
                     zf.writestr(f"{name}.png", buf.getvalue())
             else:
-                # A4 拼板邏輯
                 margin_px = int(a4_margin_cm * PX_PER_CM)
                 gap_px = 10 
                 curr_page = Image.new("RGBA", (A4_W_PX, A4_H_PX), (255, 255, 255, 255))
@@ -279,4 +301,4 @@ if st.button("🔥 開始執行生成任務", type="primary", use_container_widt
                 zf.writestr(f"A4_Layout_Page_{page_idx}.jpg", buf.getvalue())
 
         status.text("✅ 生成任務已完成！")
-        st.download_button("📥 下載產出的壓縮包 (ZIP)", zip_buf.getvalue(), "output_v6_3.zip", "application/zip", use_container_width=True)
+        st.download_button("📥 下載產出的壓縮包 (ZIP)", zip_buf.getvalue(), "output_v6_4.zip", "application/zip", use_container_width=True)
