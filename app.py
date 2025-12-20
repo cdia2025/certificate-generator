@@ -12,7 +12,7 @@ import math
 # ==========================================
 # 1. 系統初始化與頁面設定
 # ==========================================
-st.set_page_config(page_title="專業證書生成器 V6.6 批量修復版", layout="wide")
+st.set_page_config(page_title="專業證書生成器 V6.8 拼板間距版", layout="wide")
 
 DPI = 300
 PX_PER_CM = DPI / 2.54 
@@ -93,14 +93,14 @@ def draw_styled_text(draw, text, pos, font, color, align="居中", bold=False, i
 # ==========================================
 # 3. 檔案上傳
 # ==========================================
-st.title("✉️ 專業證書生成器 V6.6")
+st.title("✉️ 專業證書生成器 V6.8")
 
 up1, up2 = st.columns(2)
 with up1: bg_file = st.file_uploader("🖼️ 1. 上傳背景圖", type=["jpg", "png", "jpeg"], key="main_bg")
 with up2: data_file = st.file_uploader("📊 2. 上傳資料檔", type=["xlsx", "csv"], key="main_data")
 
 if not bg_file or not data_file:
-    st.info("👋 歡迎！V6.6 已恢復批量位移工具，並保留寬度同步與表格勾選優化。")
+    st.info("👋 歡迎！請上傳背景圖與資料檔。V6.8 支援自訂拼板間距 (MM)。")
     st.stop()
 
 bg_img = Image.open(bg_file).convert("RGBA")
@@ -136,11 +136,11 @@ with st.sidebar:
             if k not in st.session_state: st.session_state[k] = st.session_state[f"sl_{ax}_{col}"] = float(st.session_state.settings[col][ax])
 
     st.divider()
-    # 單獨調整
     for col in display_cols:
         link_tag = " (🔗)" if col in st.session_state.get('linked_layers', []) else ""
         with st.expander(f"圖層：{col}{link_tag}"):
             s = st.session_state.settings[col]
+            st.caption(f"📍 中心參考值：X={mid_x:.1f}, Y={mid_y:.1f}")
             c1, c2 = st.columns([1, 2])
             with c1: st.number_input("X", 0.0, W, key=f"num_x_{col}", on_change=sync_coord, args=(col, 'x', 'num'), label_visibility="collapsed")
             with c2: st.slider("X Slider", 0.0, W, key=f"sl_x_{col}", on_change=sync_coord, args=(col, 'x', 'sl'), label_visibility="collapsed")
@@ -156,8 +156,8 @@ with st.sidebar:
             s["align"] = st.selectbox("對齊", ["左對齊", "居中", "右對齊"], index=["左對齊", "居中", "右對齊"].index(s["align"]), key=f"al_{col}")
 
     st.divider()
-    # 批量位移工具 (修復回歸)
     with st.expander("🔗 批量位移與連結工具", expanded=False):
+        st.info(f"📍 畫布中心參考：X={mid_x:.1f}, Y={mid_y:.1f}")
         st.session_state.linked_layers = st.multiselect("選取批量對象", display_cols, default=st.session_state.linked_layers)
         lc1, lc2 = st.columns(2)
         with lc1: b_x = st.number_input("批量 X 位移", value=0.0, key="batch_move_x")
@@ -168,12 +168,9 @@ with st.sidebar:
                 nx = max(0.0, min(W, st.session_state.settings[c]["x"] + b_x))
                 ny = max(0.0, min(H, st.session_state.settings[c]["y"] + b_y))
                 ns = max(10, st.session_state.settings[c]["size"] + b_s)
-                # 更新數據
                 st.session_state.settings[c].update({"x": nx, "y": ny, "size": ns})
-                # 同步更新 UI 元件狀態
                 st.session_state[f"num_x_{c}"] = st.session_state[f"sl_x_{c}"] = nx
                 st.session_state[f"num_y_{c}"] = st.session_state[f"sl_y_{c}"] = ny
-            st.success("批量修改成功")
             st.rerun()
 
 # ==========================================
@@ -220,7 +217,7 @@ if not target_df.empty:
     st.image(canvas, width=int(W * (zoom / 100)))
 
 # ==========================================
-# 6. 生成與排版 (寬度雙向同步)
+# 6. 生成與排版 (新增拼板間距功能)
 # ==========================================
 st.divider()
 st.header("🚀 批量輸出設定")
@@ -233,10 +230,8 @@ with out_c1:
 with out_c2:
     st.write("**物件輸出寬度 (CM)**")
     w_col1, w_col2 = st.columns([1, 2])
-    
     if "out_w_num" not in st.session_state: st.session_state.out_w_num = st.session_state.out_w_cm
     if "out_w_sl" not in st.session_state: st.session_state.out_w_sl = st.session_state.out_w_cm
-
     with w_col1:
         st.number_input("CM 數值", 1.0, 50.0, step=0.1, key="out_w_num", on_change=sync_out_w, args=("num",), label_visibility="collapsed")
     with w_col2:
@@ -244,6 +239,8 @@ with out_c2:
     
     final_w_cm = st.session_state.out_w_cm
     a4_margin_cm = st.number_input("A4 頁邊界 (CM)", 0.0, 5.0, 1.0, step=0.1)
+    # --- 新增：拼板間距設定 ---
+    item_gap_mm = st.number_input("圖與圖之間距離 (MM)", 0.0, 10.0, 0.5, step=0.1)
 
 with out_c3:
     item_w_px = int(final_w_cm * PX_PER_CM)
@@ -275,19 +272,37 @@ if st.button("🔥 開始執行生成任務", type="primary", use_container_widt
                 for name, img in results:
                     buf = io.BytesIO(); img.save(buf, format="PNG"); zf.writestr(f"{name}.png", buf.getvalue())
             else:
+                # A4 拼板邏輯 (修正間距應用)
                 margin_px = int(a4_margin_cm * PX_PER_CM)
-                gap_px = 10 
+                gap_px = int((item_gap_mm / 10) * PX_PER_CM) # 將 MM 轉為像素
+                
                 curr_page = Image.new("RGBA", (A4_W_PX, A4_H_PX), (255, 255, 255, 255))
                 cx, cy, max_rh, page_idx = margin_px, margin_px, 0, 1
+                
                 for idx, (name, img) in enumerate(results):
-                    if cx + item_w_px > A4_W_PX - margin_px: cx, cy, max_rh = margin_px, cy + max_rh + gap_px, 0
+                    # 換行檢查：目前 X + 物件寬度 是否超過 頁面寬度 - 邊界
+                    if cx + item_w_px > A4_W_PX - margin_px:
+                        cx = margin_px
+                        cy += max_rh + gap_px
+                        max_rh = 0
+                    
+                    # 換頁檢查：目前 Y + 物件高度 是否超過 頁面高度 - 邊界
                     if cy + item_h_px > A4_H_PX - margin_px:
-                        buf = io.BytesIO(); curr_page.convert("RGB").save(buf, format="JPEG", quality=95); zf.writestr(f"A4_Page_{page_idx}.jpg", buf.getvalue())
+                        buf = io.BytesIO()
+                        curr_page.convert("RGB").save(buf, format="JPEG", quality=95)
+                        zf.writestr(f"A4_Page_{page_idx}.jpg", buf.getvalue())
+                        # 重置新頁面
                         curr_page = Image.new("RGBA", (A4_W_PX, A4_H_PX), (255, 255, 255, 255))
                         cx, cy, max_rh, page_idx = margin_px, margin_px, 0, page_idx + 1
+                    
                     curr_page.paste(img, (cx, cy), img)
-                    max_rh = max(max_rh, item_h_px); cx += item_w_px + gap_px
-                buf = io.BytesIO(); curr_page.convert("RGB").save(buf, format="JPEG", quality=95); zf.writestr(f"A4_Page_{page_idx}.jpg", buf.getvalue())
+                    max_rh = max(max_rh, item_h_px)
+                    cx += item_w_px + gap_px
+                
+                # 存最後一頁
+                buf = io.BytesIO()
+                curr_page.convert("RGB").save(buf, format="JPEG", quality=95)
+                zf.writestr(f"A4_Page_{page_idx}.jpg", buf.getvalue())
 
         status.text("✅ 生成任務已完成！")
-        st.download_button("📥 下載產出的壓縮包 (ZIP)", zip_buf.getvalue(), "output_v6_6.zip", "application/zip", use_container_width=True)
+        st.download_button("📥 下載產出的壓縮包 (ZIP)", zip_buf.getvalue(), "output_v6_8.zip", "application/zip", use_container_width=True)
